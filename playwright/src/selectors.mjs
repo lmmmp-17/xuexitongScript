@@ -2,6 +2,9 @@
  * 平台改版时只需要动这个文件。 */
 export const SEL = {
     tree: '#coursetree',
+    /* 目录侧栏的展开/收起按钮。收起时整个侧栏 position:fixed 滑到视口右边外面,
+     * 只有这个按钮露在视口右上角(实测) */
+    catalogToggle: '#selector .switchbtn',
     chapter: '#coursetree > ul > li',
     section: '.posCatalog_select:not(.firstLayer)',
     sectionName: '.posCatalog_name',

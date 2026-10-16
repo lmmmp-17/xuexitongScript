@@ -44,7 +44,7 @@ async function main() {
             const report = await inspectPage(page, {
                 /* 把指针移进播放器, 再补一次 1px 移动迫使浏览器重新命中测试 */
                 hoverPlayer: async (frame, selector) => {
-                    const box = await frame.locator(selector).first.boundingBox();
+                    const box = await frame.locator(selector).first().boundingBox();
                     if (!box) return;
                     await pointer.moveTo({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
                     await page.mouse.move(Math.round(pointer.state.x) + 1, Math.round(pointer.state.y));

@@ -93,13 +93,54 @@ export class CourseRunner {
                     readyState: el.readyState,
                 })).catch(() => null);
                 if (!info || !info.media) continue;
-                if (info.readyState > 0) return { frame, locator };
-                fallback = fallback || { frame, locator };
+                const finished = await this.videoJobFinished(frame);
+                /* 已完成任务点的视频只作兜底: 同一节里可能还有没放完的 */
+                if (info.readyState > 0 && finished !== true) return { frame, locator, finished };
+                fallback = fallback || { frame, locator, finished };
             } catch (e) {
                 this.log.trace('读取 frame 失败，跳过:', e.message);
             }
         }
         return fallback;
+    }
+
+    /* 读当前小节卡片里的任务点。
+     *
+     * 真实页面(mooc2 布局)上一个小节的卡片里可能同时有视频和章节测验，各自是一个
+     * .ans-attach-ct，完成的带 ans-job-finished：
+     *   .ans-attach-ct.videoContainer.ans-job-finished  > iframe /ananas/modules/video/
+     *   .ans-attach-ct                                  > iframe /ananas/modules/work/
+     * 目录上的"1个待完成任务点"可能是测验而不是视频，所以得看这里才知道视频要不要放。
+     * 没有卡片 frame(旧布局)时返回 null。 */
+    async readJobs(timeoutMs = this.config.jobsWaitMs ?? 6000) {
+        const deadline = Date.now() + timeoutMs;
+        for (;;) {
+            const cards = this.page.frames().find((f) => !f.isDetached() && f.url().includes('/knowledge/cards'));
+            if (cards) {
+                const jobs = await cards.evaluate(() => Array.from(document.querySelectorAll('.ans-attach-ct')).map((ct) => {
+                    const src = (ct.querySelector('iframe') || {}).getAttribute
+                        ? ct.querySelector('iframe').getAttribute('src') || '' : '';
+                    const kind = /modules\/video/.test(src) ? 'video' : /modules\/work/.test(src) ? 'work' : 'other';
+                    return { kind, finished: ct.classList.contains('ans-job-finished'), isJob: !!ct.querySelector('.ans-job-icon') };
+                })).catch(() => []);
+                if (jobs.length) return jobs.filter((job) => job.isJob);
+            }
+            if (Date.now() >= deadline) return cards ? [] : null;
+            await sleepFor([300, 700]);
+        }
+    }
+
+    /* 视频所在 iframe 的外层 .ans-attach-ct 有没有 ans-job-finished */
+    async videoJobFinished(frame) {
+        try {
+            const element = await frame.frameElement();
+            return await element.evaluate((el) => {
+                const ct = el.closest('.ans-attach-ct');
+                return ct ? ct.classList.contains('ans-job-finished') : null;
+            });
+        } catch (e) {
+            return null;
+        }
     }
 
     /* 切节点之后播放器要装一会儿才会出现 video 元素，不能看一眼就判定“这节没视频” */
@@ -133,43 +174,48 @@ export class CourseRunner {
     /* 起播优先用真实点击：播放器的大播放按钮本来就是给人点的，
      * 点它既能拿到用户激活（不会被 autoplay 策略拦），行为也最普通。 */
     async startPlayback(video) {
+        const atEnd = (state) => state && (state.ended || (state.duration > 0 && state.currentTime >= state.duration - 0.4));
         const before = await this.videoState(video);
         if (before && !before.paused && before.currentTime > 0) {
             this.log.note('视频已在播放');
             return true;
         }
-
-        const buttons = [SEL.bigPlayButton, SEL.playControl];
-        for (const selector of buttons) {
-            const button = video.frame.locator(selector).first();
-            try {
-                if (await button.count() === 0) continue;
-                if (!await button.isVisible()) continue;
-                this.log.note(`点击播放按钮 ${selector}`);
-                await this.pointer.click(button);
-                await sleepFor([700, 1600]);
-                const after = await this.videoState(video);
-                if (after && !after.paused) return true;
-            } catch (e) {
-                this.log.trace(`点 ${selector} 没成功:`, e.message);
-            }
+        /* 播完的视频上 .vjs-play-control 的文字是"重播", 点下去会从头再放一遍 */
+        if (atEnd(before)) {
+            this.log.note('视频已经在结尾, 不去点"重播"');
+            return false;
         }
 
-        /* 播放器皮肤不一样时，点视频画面本身也是人会做的操作 */
-        try {
-            const state = await this.videoState(video);
-            if (state && state.paused) {
-                this.log.note('点击视频画面起播');
-                await this.pointer.click(video.locator);
+        /* 判断"起来了没有"要看进度有没有走, 不能只看 paused: 起播后马上碰到视频内
+         * 弹题、或者视频本身很短已经放完, 都会是暂停态。只看 paused 会误判失败,
+         * 接着去点下一个按钮——放完的视频上那个按钮正是"重播"。 */
+        const started = (after) => after && (!after.paused || after.currentTime > (before ? before.currentTime : 0) + 0.05);
+
+        const attempts = [
+            [SEL.bigPlayButton, () => video.frame.locator(SEL.bigPlayButton).first()],
+            [SEL.playControl, () => video.frame.locator(SEL.playControl).first()],
+            /* 播放器皮肤不一样时，点视频画面本身也是人会做的操作 */
+            ['视频画面', () => video.locator],
+        ];
+        for (const [name, target] of attempts) {
+            try {
+                const now = await this.videoState(video);
+                if (started(now)) return true;
+                if (atEnd(now)) return true;    /* 上一次点击其实已经放完了, 别再点"重播" */
+                const button = target();
+                if (await button.count() === 0 || !await button.isVisible()) continue;
+                this.log.note(`点击 ${name} 起播`);
+                await this.pointer.click(button);
                 await sleepFor([700, 1600]);
-                const after = await this.videoState(video);
-                if (after && !after.paused) return true;
+                if (started(await this.videoState(video))) return true;
+            } catch (e) {
+                this.log.trace(`点 ${name} 没成功:`, e.message);
             }
-        } catch (e) {
-            this.log.trace('点击视频画面失败:', e.message);
         }
 
         /* 兜底才用脚本调用。前面已经有过真实点击，所以这里通常不会被策略拦。 */
+        const last = await this.videoState(video);
+        if (started(last) || atEnd(last)) return true;
         if (this.config.allowScriptedPlay) {
             this.log.warn('真实点击未能起播，改用 video.play()（这一步是脚本调用，不是真实点击）');
             const ok = await video.locator.evaluate((el) => el.play().then(() => true).catch(() => false));
@@ -308,6 +354,36 @@ export class CourseRunner {
         await sleep(ms);
     }
 
+    /* 目录侧栏收起时目标项在视口外, 先点开侧栏——看不到目录时人也是这么做的 */
+    async ensureCatalogVisible(locator) {
+        const width = await this.page.evaluate(() => window.innerWidth);
+        const visible = async () => {
+            const box = await locator.boundingBox();
+            return !!box && box.x >= 0 && box.x + box.width <= width;
+        };
+        if (await visible()) return true;
+        const toggle = this.page.locator(SEL.catalogToggle).first();
+        if (!await toggle.count() || !await toggle.isVisible()) return false;
+        this.log.note('目录侧栏是收起的, 先点开');
+        await this.pointer.click(toggle);
+        await sleepFor([800, 1400]);   /* 侧栏有滑入动画 */
+        return visible();
+    }
+
+    /* 点完目录项之后确认真的切过去了: 激活项变成了目标节 */
+    async waitForSection(target, timeoutMs) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const tree = await this.readTree();
+            const current = tree.current;
+            if (current && current.chapterIndex === target.chapterIndex && current.sectionIndex === target.sectionIndex) {
+                return true;
+            }
+            await sleepFor([300, 600]);
+        }
+        return false;
+    }
+
     async gotoNextSection() {
         const tree = await this.readTree();
         if (!tree.current) {
@@ -329,9 +405,29 @@ export class CourseRunner {
             return false;
         }
 
-        this.log.say(`切换到：${target.title || `第${target.chapterIndex + 1}章第${target.sectionIndex + 1}节`}`);
+        const name = target.title || `第${target.chapterIndex + 1}章第${target.sectionIndex + 1}节`;
+        this.log.say(`切换到：${name}`);
         const locator = this.sectionLocator(target);
-        await this.pointer.click(locator, { scrollAnchor: this.page.locator(SEL.tree) });
+
+        /* 以前点完就当切过去了。实测目录侧栏收起时点击落在视口外, 页面纹丝不动,
+         * 工具却每隔几秒重新"切换"一次同一节。现在点完必须确认激活项真的变了,
+         * 不行就重试一次, 再不行就停下, 不原地打转。 */
+        let moved = false;
+        for (let attempt = 1; attempt <= 2 && !moved && !this.stopped; attempt += 1) {
+            try {
+                await this.ensureCatalogVisible(locator);
+                await this.pointer.click(locator, { scrollAnchor: this.page.locator(SEL.tree) });
+            } catch (e) {
+                this.log.warn(`点目录里的「${name}」失败: ${e.message.split('\n')[0]}`);
+            }
+            moved = await this.waitForSection(target, this.config.sectionSwitchWaitMs);
+            if (!moved && attempt === 1) this.log.warn('点完目录没有切过去, 再试一次');
+        }
+        if (!moved) {
+            this.log.error(`点了目录里的「${name}」但页面没有切过去, 已停下。可能是平台弹了提示框或者目录结构变了, 请看一眼浏览器。`);
+            this.stop('切换小节失败');
+            return false;
+        }
         await sleepFor(this.config.sectionLoadMs);
         /* 新的一节重新给满重试次数 */
         this.chapterTestTries = 0;
@@ -357,11 +453,39 @@ export class CourseRunner {
                 return;
             }
 
+            /* .prev_title 在旧布局里是步骤名("视频"/"章节测验"), 但实测 mooc2 布局里
+             * 它是小节标题, 靠它判断会全部落空。所以先看卡片里的任务点。 */
             const step = await this.currentStepTitle();
-            /* 已经在视频步骤上就多等一会儿等播放器装好；其它步骤没必要干等 */
-            const waitMs = step === '视频' ? this.config.videoWaitMs : human.ms(this.config.stepProbeMs);
-            const video = await this.findVideoWithWait(waitMs);
+            const jobs = await this.readJobs();
+            const pendingVideo = jobs ? jobs.some((job) => job.kind === 'video' && !job.finished) : false;
+            const pendingOther = jobs ? jobs.filter((job) => job.kind !== 'video' && !job.finished).length : 0;
+            if (jobs) {
+                this.log.note(`本节任务点: ${jobs.map((job) => `${job.kind}${job.finished ? '✓' : '…'}`).join(' ') || '无'}`);
+            }
+
+            /* 有没完成的视频就多等一会儿等播放器装好；其它情况没必要干等 */
+            const expectVideo = pendingVideo || step === '视频';
+            const waitMs = expectVideo ? this.config.videoWaitMs : human.ms(this.config.stepProbeMs);
+            let video = await this.findVideoWithWait(waitMs);
             if (this.stopped) return;
+
+            if (video && (video.finished === true || (jobs && !pendingVideo))) {
+                this.log.note('本节视频任务点已经完成, 不再重放');
+                video = null;
+            }
+
+            if (!video && jobs && !pendingVideo) {
+                /* 新布局: 视频要么没有、要么已完成, 剩下的是测验等非视频任务点 */
+                const rest = pendingOther ? `还剩 ${pendingOther} 个非视频任务点(章节测验等)需要你自己完成` : '本节任务点已全部完成';
+                if (!this.config.autoAdvanceNoVideo && pendingOther) {
+                    this.log.warn(`本节没有待播的视频, ${rest}。已停下; 确认后加 --auto-advance-no-video 可自动跳到下一节。`);
+                    return;
+                }
+                this.log.say(`本节没有待播的视频, ${rest}, 切到下一节`);
+                if (!await this.gotoNextSection()) return;
+                continue;
+            }
+
             if (!video) {
                 this.log.note(`当前步骤「${step || '未知'}」没有视频`);
 

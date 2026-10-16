@@ -138,10 +138,43 @@ export function createPointer(page, options = {}) {
         return locator.boundingBox();
     }
 
-    async function click(locator, options = {}) {
-        const box = await revealBox(locator, options.scrollAnchor);
+    /* 只读命中测试: 落点下面是不是这个元素(或它的子孙)。
+     * 元素可能在 iframe 里, boundingBox 给的是主 frame 坐标, elementFromPoint 要的是
+     * 元素所在 frame 的坐标, 两者之差就是 frame 的偏移。 */
+    async function hits(locator, box, point) {
+        const local = await locator.evaluate((el) => {
+            const rect = el.getBoundingClientRect();
+            return { x: rect.left, y: rect.top };
+        });
+        const x = point.x - (box.x - local.x);
+        const y = point.y - (box.y - local.y);
+        return locator.evaluate((el, p) => {
+            const hit = el.ownerDocument.elementFromPoint(p.x, p.y);
+            return !!hit && (hit === el || el.contains(hit));
+        }, { x, y });
+    }
+
+    /* 走不通人类化路径时交给 Playwright 自己的 click: 它会等元素可交互,
+     * 等不到就抛错——宁可报错, 也不能在空白处按下去当作点过了。 */
+    async function fallback(locator, reason) {
+        await locator.click({ timeout: options.fallbackTimeoutMs ?? 15000 });
+        return { fallback: reason };
+    }
+
+    async function click(locator, clickOptions = {}) {
+        const box = await revealBox(locator, clickOptions.scrollAnchor);
         if (!box) throw new Error('目标元素不可见，无法点击');
-        await moveToBox(box);
+
+        /* revealBox 只会纵向滚动。横向在视口外(比如收起后滑到屏幕右边的侧栏)时,
+         * 以前会直接把指针移到视口外按下去: 什么都没点到, 也不报错, 调用方以为
+         * 点过了——学习通目录收起时工具就是这样在同一节上原地打转的。 */
+        const { width, height } = await viewport();
+        const inView = box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height;
+        if (!inView) return fallback(locator, '目标在视口外');
+
+        const target = await moveToBox(box);
+        if (!await hits(locator, box, target)) return fallback(locator, '落点被其它元素挡住');
+
         /* 移到位之后先停一下再按下：人不会在指针停住的同一毫秒按键 */
         await sleep(human.int(45, 190));
         await page.mouse.down();

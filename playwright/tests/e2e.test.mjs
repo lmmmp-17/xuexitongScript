@@ -32,6 +32,7 @@ const fast = {
     idleActivityMs: [250, 500],
     videoWaitMs: 6000,
     treeTimeoutMs: 15000,
+    jobsWaitMs: 300,
 };
 
 async function launch() {
@@ -180,4 +181,65 @@ test('失焦之后 hasFocus 仍为 true，播放不受影响', async (t) => {
         await server.close();
         await rm(profileDir, { recursive: true, force: true });
     }
+});
+
+
+/* ------------------------------------------------------------------
+ * 新布局(mooc2): 照真实页面实测的结构。
+ * 1.1 视频已完成、只剩章节测验; 1.2 视频没看完; 1.3 全部完成。
+ * 播放器桩上, 已结束视频的控制栏按钮是"重播", 点它会从头再放(记进 replays)。
+ * ------------------------------------------------------------------ */
+async function runMooc2(t, overrides, query = '') {
+    const launched = await launch();
+    if (launched.skip) return t.skip(launched.skip);
+    const { context, profileDir } = launched;
+    const server = await startFixtureServer({ layout: 'mooc2' });
+    const log = createLogger('silent');
+    try {
+        const page = await context.newPage();
+        await page.goto(server.url + query, { waitUntil: 'domcontentloaded' });
+        const pointer = createPointer(page, { x: 0, y: 0 });
+        const runner = new CourseRunner({ page, pointer, config: { ...fast, jobsWaitMs: 4000, ...overrides }, log });
+        await runner.run();
+        return { probe: await page.evaluate(() => window.__probe), runner };
+    } finally {
+        await context.close();
+        await server.close();
+        await rm(profileDir, { recursive: true, force: true });
+    }
+}
+
+test('mooc2: 视频已完成时不点"重播", 剩测验时按默认配置停下', async (t) => {
+    const out = await runMooc2(t, {});
+    if (!out) return;
+    const { probe } = out;
+    assert.equal(probe.replays, 0, `不应重放已完成的视频: ${probe.log.join(' | ')}`);
+    assert.equal(probe.realPlayClicks, 0, '这一节没有要播的视频');
+    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A'], '默认配置下应停在 1.1, 不自动跳节');
+    assert.deepEqual(probe.rejected, []);
+});
+
+test('mooc2: 开启自动跳节后, 跳过已完成的视频、真实点击播完没看的那一节', async (t) => {
+    const out = await runMooc2(t, { autoAdvanceNoVideo: true });
+    if (!out) return;
+    const { probe, runner } = out;
+    assert.deepEqual(probe.rejected, [], `出现不可信事件: ${probe.rejected}`);
+    assert.equal(probe.replays, 0, `不应重放已完成的视频: ${probe.log.join(' | ')}`);
+    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A', 'open:B', 'open:C']);
+    assert.ok(probe.log.includes('play:big:B'), `1.2 应当真实点大播放按钮起播: ${probe.log.join(' | ')}`);
+    assert.ok(probe.log.includes('ended:B'), '1.2 应当播完');
+    assert.equal(probe.scriptedPlays, 0, '不应退回 video.play()');
+    assert.equal(runner.sectionsDone, 1, '只有 1.2 是真正放了视频的');
+});
+
+test('mooc2: 目录侧栏收起时先真实点开, 再点目标小节', async (t) => {
+    /* 实测: 侧栏收起后滑到视口外, 以前的点击落在视口外、页面不动, 工具在同一节上打转 */
+    const out = await runMooc2(t, { autoAdvanceNoVideo: true }, '&collapsed=1');
+    if (!out) return;
+    const { probe } = out;
+    assert.deepEqual(probe.rejected, [], `出现不可信事件: ${probe.rejected}`);
+    assert.ok(probe.log.includes('catalog-open'), `应当先点开目录: ${probe.log.join(' | ')}`);
+    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A', 'open:B', 'open:C']);
+    assert.ok(probe.log.includes('play:big:B'));
+    assert.equal(probe.replays, 0);
 });

@@ -948,9 +948,24 @@
             async play() {
                 if (this._destroyed) return;
                 try {
+                    /* .prev_title 在旧布局里是步骤名("视频"/"章节测验"), 但实测 mooc2
+                     * 布局里它是小节标题, 靠它判断会全部落空。先看卡片里的任务点。 */
+                    const jobs = this._readJobs();
+                    const pendingVideo = jobs ? jobs.some((job) => job.kind === 'video' && !job.finished) : false;
+                    if (jobs && jobs.length && !pendingVideo) {
+                        this._handleNoPendingVideo(jobs);
+                        return;
+                    }
+
                     const el = this._getVideoEl();
+                    /* 对已经播完的视频调 play() 会从头重播——已完成的任务点不该再放一遍 */
+                    if (el != null && (el.ended || this._videoJobFinished(el) === true)) {
+                        this._note('%c本节视频任务点已经完成, 不再重放', 'color:#607D8B');
+                        this._handleNoPendingVideo(jobs);
+                        return;
+                    }
                     if (el == null) {
-                        if (this._currentStepTitle() === '视频') {
+                        if (pendingVideo || this._currentStepTitle() === '视频') {
                             throw new Error('视频组件尚未加载完成');
                         }
                         if (this._advanceLearningStep()) {
@@ -1208,6 +1223,53 @@
                     return null;
                 }
             },
+            /* 读当前小节卡片里的任务点(实测 mooc2 布局):
+             *   .ans-attach-ct.videoContainer[.ans-job-finished] > iframe /ananas/modules/video/
+             *   .ans-attach-ct[.ans-job-finished]                > iframe /ananas/modules/work/
+             * 目录上的"1个待完成任务点"可能是章节测验而不是视频, 只有看这里才知道
+             * 视频要不要放。找不到卡片文档(旧布局)时返回 null。 */
+            _readJobs() {
+                for (const frame of dom.select('iframe').toArray()) {
+                    const doc = this._frameDocument(frame);
+                    if (!doc || typeof doc.querySelectorAll !== 'function') continue;
+                    const containers = Array.from(doc.querySelectorAll('.ans-attach-ct'));
+                    if (!containers.length) continue;
+                    return containers
+                        .filter((ct) => ct.querySelector('.ans-job-icon'))
+                        .map((ct) => {
+                            const inner = ct.querySelector('iframe');
+                            const src = inner ? (inner.getAttribute('src') || '') : '';
+                            const kind = /modules\/video/.test(src) ? 'video' : (/modules\/work/.test(src) ? 'work' : 'other');
+                            return { kind, finished: ct.classList.contains('ans-job-finished') };
+                        });
+                }
+                return null;
+            },
+            /* 这个 video 所在的任务点是否已完成(看外层 .ans-attach-ct) */
+            _videoJobFinished(video) {
+                try {
+                    const frameEl = video.ownerDocument.defaultView.frameElement;
+                    const ct = frameEl && typeof frameEl.closest === 'function' ? frameEl.closest('.ans-attach-ct') : null;
+                    return ct ? ct.classList.contains('ans-job-finished') : null;
+                } catch (e) {
+                    return null;
+                }
+            },
+            /* 本节没有待播的视频: 视频要么没有、要么已完成 */
+            _handleNoPendingVideo(jobs) {
+                this._isPlaying = false;
+                this._clearCheckInterval();
+                const pendingOther = jobs ? jobs.filter((job) => job.kind !== 'video' && !job.finished).length : 0;
+                const rest = pendingOther
+                    ? `还剩 ${pendingOther} 个非视频任务点(章节测验等)需要你自己完成`
+                    : '本节任务点已全部完成';
+                if (this.configs.autoAdvanceNoVideo || !pendingOther) {
+                    this._say(`%c本节没有待播的视频, ${rest}, 切到下一节`, 'color:#607D8B');
+                    this.nextUnit();
+                    return;
+                }
+                log.warn(`%c本节没有待播的视频, ${rest}。已停下; 确认后可执行 configs.autoAdvanceNoVideo = true 再 run()。`, 'color:#FF9800');
+            },
             _getVideoEl() {
                 if (this._videoEl) return this._videoEl;
 
@@ -1231,12 +1293,19 @@
                     return null;
                 };
 
+                let finishedFallback = null;
                 for (const frame of dom.select('iframe').toArray()) {
                     const video = findVideo(frame, 0);
-                    if (video) {
-                        this._videoEl = video;
-                        break;
+                    if (!video) continue;
+                    if (this._videoJobFinished(video) === true) {
+                        finishedFallback = finishedFallback || video;
+                        continue;
                     }
+                    this._videoEl = video;
+                    break;
+                }
+                if (!this._videoEl && finishedFallback) {
+                    this._videoEl = finishedFallback;
                 }
 
                 if (!this._videoEl && blockedFrames > 0) {

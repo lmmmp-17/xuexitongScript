@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  body { margin: 0; }
+  /* 照实测的 video.js 7 结构: 起播后大按钮隐藏; 播完后控制栏按钮文字是"重播" */
+  #video { position: relative; width: 844px; height: 474px; background: #000; }
+  video { width: 100%; height: 100%; display: block; }
+  .vjs-big-play-button { position: absolute; left: 380px; top: 200px; width: 90px; height: 60px; cursor: pointer; }
+  #video.vjs-has-started .vjs-big-play-button { display: none; }
+  .vjs-control-bar { position: absolute; left: 0; bottom: 0; width: 100%; height: 46px; background: #222; }
+  .vjs-play-control { position: absolute; left: 14px; top: 3px; width: 40px; height: 40px; cursor: pointer; }
+</style></head>
+<body>
+<div id="video" class="video-js vjs-default-skin vjs-big-play-centered">
+  <video id="video_html5_api" class="vjs-tech"></video>
+  <button class="vjs-big-play-button" type="button"><span class="vjs-control-text">播放视频</span></button>
+  <div class="vjs-control-bar">
+    <button class="vjs-play-control vjs-control vjs-button" type="button"><span class="vjs-control-text">播放</span></button>
+  </div>
+</div>
+<script>
+const probe = top.__probe;
+const params = new URLSearchParams(location.search);
+const DURATION = 1.6;
+const root = document.getElementById('video');
+const video = document.getElementById('video_html5_api');
+let at = params.get('at') === 'end' ? DURATION : 0;
+let paused = true;
+if (at >= DURATION) { root.classList.add('vjs-has-started', 'vjs-ended'); }
+const label = () => document.querySelector('.vjs-play-control .vjs-control-text');
+const sync = () => {
+  label().textContent = at >= DURATION && paused ? '重播' : (paused ? '播放' : '暂停');
+};
+const def = (n, g) => Object.defineProperty(video, n, { get: g, configurable: true });
+def('currentTime', () => at); def('duration', () => DURATION); def('paused', () => paused);
+def('ended', () => at >= DURATION); def('readyState', () => 4);
+video.play = () => { probe.scriptedPlays += 1; probe.log.push('scripted-play'); paused = false; root.classList.add('vjs-has-started'); sync(); return Promise.resolve(); };
+const start = (via) => (e) => {
+  if (!e.isTrusted) { probe.rejected.push('player:' + via); return; }
+  if (at >= DURATION) { probe.replays += 1; probe.log.push('replay'); at = 0; }   // 点"重播"会从头再放
+  probe.realPlayClicks += 1; probe.log.push('play:' + via + ':' + params.get('section'));
+  paused = false; root.classList.add('vjs-has-started'); sync();
+};
+document.querySelector('.vjs-big-play-button').addEventListener('click', start('big'));
+document.querySelector('.vjs-play-control').addEventListener('click', start('control'));
+setInterval(() => {
+  if (!paused && at < DURATION) { at = Math.min(DURATION, at + 0.08); if (at >= DURATION) { paused = true; probe.log.push('ended:' + params.get('section')); } sync(); }
+}, 40);
+sync();
+</script>
+</body></html>

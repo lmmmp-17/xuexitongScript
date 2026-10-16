@@ -111,9 +111,29 @@ function fakePage(tree) {
             return self;
         },
         async evaluate(fn, arg) {
-            void fn;
             void arg;
+            if (String(fn).includes('innerWidth')) return 1280;
             return tree;
+        },
+    };
+}
+
+/* 点了目录项之后, 真实页面会把激活项移到被点的那一节。假页面也照做,
+ * 否则 gotoNextSection 的"确认切过去"永远等不到。 */
+function clickingMovesActive(tree, picked) {
+    return {
+        async click(locator) {
+            picked.push(locator.chain.join(' > '));
+            const indexes = locator.chain
+                .filter((part) => part.startsWith('nth('))
+                .map((part) => Number(part.slice(4, -1)));
+            if (indexes.length >= 2) {
+                const [c, sec] = indexes;
+                tree.chapters.forEach((ch) => ch.sections.forEach((item) => { item.active = false; }));
+                const hit = tree.chapters[c].sections[sec];
+                hit.active = true;
+                tree.current = hit;
+            }
         },
     };
 }
@@ -131,8 +151,8 @@ test('切节：同章有下一节就点它', async () => {
     const picked = [];
     const runner = new CourseRunner({
         page,
-        pointer: { async click(locator) { picked.push(locator.chain.join(' > ')); } },
-        config: { ...defaults, sectionLoadMs: [1, 2] },
+        pointer: clickingMovesActive(tree, picked),
+        config: { ...defaults, sectionLoadMs: [1, 2], sectionSwitchWaitMs: 500 },
         log: silent,
     });
     assert.equal(await runner.gotoNextSection(), true);
@@ -150,10 +170,11 @@ test('切节：本章放完跳到下一章第一节，没有下一章就收尾',
     });
 
     const picked = [];
+    const firstTree = base(0);
     const runner = new CourseRunner({
-        page: fakePage(base(0)),
-        pointer: { async click(locator) { picked.push(locator.chain.join(' > ')); } },
-        config: { ...defaults, sectionLoadMs: [1, 2] },
+        page: fakePage(firstTree),
+        pointer: clickingMovesActive(firstTree, picked),
+        config: { ...defaults, sectionLoadMs: [1, 2], sectionSwitchWaitMs: 500 },
         log: silent,
     });
     assert.equal(await runner.gotoNextSection(), true);
@@ -241,7 +262,7 @@ test('页签点了却始终没出现视频时要停手，不能原地打转', as
         config: {
             ...defaults,
             startupDelayMs: [1, 2], stepProbeMs: [1, 2], stepSwitchWaitMs: [1, 2],
-            videoProbeMs: [1, 2], maxStepSwitchTries: 3,
+            videoProbeMs: [1, 2], maxStepSwitchTries: 3, jobsWaitMs: 1,
         },
         log: silent,
     });
@@ -252,4 +273,26 @@ test('页签点了却始终没出现视频时要停手，不能原地打转', as
         new Promise((_, reject) => setTimeout(() => reject(new Error('run() 没有在上限处停下')), 5000)),
     ]);
     assert.equal(clicks, 3, `应当恰好点 3 次页签就停，实际 ${clicks} 次`);
+});
+
+test('切节：点了目录却没切过去时重试一次就停下，不原地打转', async () => {
+    const tree = {
+        chapters: [{ chapterIndex: 0, sections: [
+            { chapterIndex: 0, sectionIndex: 0, title: '1.1', active: true },
+            { chapterIndex: 0, sectionIndex: 1, title: '1.2', active: false },
+        ] }],
+        current: { chapterIndex: 0, sectionIndex: 0, title: '1.1', active: true },
+        total: 2,
+    };
+    let clicks = 0;
+    const runner = new CourseRunner({
+        page: fakePage(tree),
+        /* 实测: 目录收起时点击落在视口外, 页面不动 */
+        pointer: { async click() { clicks += 1; } },
+        config: { ...defaults, sectionLoadMs: [1, 2], sectionSwitchWaitMs: 200 },
+        log: silent,
+    });
+    assert.equal(await runner.gotoNextSection(), false);
+    assert.equal(clicks, 2, '应当只点两次: 一次加一次重试');
+    assert.equal(runner.stopped, true, '切不过去就该停下');
 });

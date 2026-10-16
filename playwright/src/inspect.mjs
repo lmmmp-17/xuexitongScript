@@ -118,9 +118,13 @@ export async function inspectPage(page, { hoverPlayer = null } = {}) {
 
         if (hoverPlayer) {
             /* 控制栏多半要指针进入才显示——智慧树那个就是。交给调用方移动指针后再看一次 */
-            await hoverPlayer(frame, selector);
-            const hovered = await frame.evaluate(`(${SUBTREE_JS})(${JSON.stringify({ selector, maxDepth: 4, maxNodes: 120 })})`);
-            if (hovered) lines.push('--- 指针移进播放器之后 ---', render(hovered));
+            try {
+                await hoverPlayer(frame, selector);
+                const hovered = await frame.evaluate(`(${SUBTREE_JS})(${JSON.stringify({ selector, maxDepth: 4, maxNodes: 120 })})`);
+                if (hovered) lines.push('--- 指针移进播放器之后 ---', render(hovered));
+            } catch (e) {
+                lines.push(`--- 指针移进播放器失败: ${e.message.split('\n')[0]} ---`);
+            }
         }
 
         if (info.popups.length) {

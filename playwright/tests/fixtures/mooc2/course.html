@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>学生学习页面</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  /* 照实测: 目录在右侧固定侧栏里, 收起时整个侧栏滑到视口右边外面,
+     只有 .switchbtn 露在视口里 */
+  #selector { position: fixed; top: 0; right: 0; width: 300px; height: 100vh; background: #fff;
+    border-left: 1px solid #ddd; transition: right .25s; }
+  body.collapsed #selector { right: -308px; }
+  #selector .switchbtn { position: absolute; left: -40px; top: 10px; width: 32px; height: 40px;
+    background: #ccc; cursor: pointer; }
+  #coursetree { width: 300px; height: 100vh; overflow-y: auto; }
+  #coursetree ul { margin: 0; padding: 0; } #coursetree li { list-style: none; }
+  .posCatalog_select { padding: 12px 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
+  .posCatalog_select.firstLayer { font-weight: bold; cursor: default; }
+  .posCatalog_active { background: #e3f2fd; }
+  main { padding: 10px; margin-right: 310px; }
+  body.collapsed main { margin-right: 0; }
+  #iframe { width: 900px; height: 720px; border: 0; }
+</style>
+</head>
+<body>
+<!-- 照实测的 mooc2 布局: .prev_title 是小节标题, 不是"视频"/"章节测验" -->
+<div id="selector" class="posChapter posChapter_right"><div class="switchbtn"></div>
+<div id="coursetree"><ul>
+  <li>
+    <div class="posCatalog_select firstLayer"><span class="posCatalog_name" title="第一章">第一章</span></div>
+    <div class="posCatalog_select posCatalog_active" data-section="A"><span class="posCatalog_name" title="1.1 视频已完成, 只剩测验">1.1 视频已完成, 只剩测验</span>
+      <span class="jobUnfinishCount"><span class="catalog_points_yi prevTips">1个待完成任务点</span></span></div>
+    <div class="posCatalog_select" data-section="B"><span class="posCatalog_name" title="1.2 视频没看完">1.2 视频没看完</span>
+      <span class="jobUnfinishCount"><span class="catalog_points_yi prevTips">1个待完成任务点</span></span></div>
+    <div class="posCatalog_select" data-section="C"><span class="posCatalog_name" title="1.3 全部完成">1.3 全部完成</span>
+      <span class="icon_Completed prevTips">已完成</span></div>
+  </li>
+</ul></div>
+</div>
+<main>
+  <div class="prev_title" title=""></div>
+  <iframe id="iframe"></iframe>
+</main>
+<script>
+/* 只接受 isTrusted 的事件。子 frame 通过 top.__probe 汇报。 */
+const probe = { rejected: [], log: [], replays: 0, realPlayClicks: 0, scriptedPlays: 0 };
+window.__probe = probe;
+const trusted = (fn) => (e) => {
+  if (!e.isTrusted) { probe.rejected.push(e.type + ':' + (e.target.className || e.target.tagName)); return; }
+  fn(e);
+};
+function open(section) {
+  document.querySelectorAll('.posCatalog_select').forEach((el) => el.classList.toggle('posCatalog_active', el.dataset.section === section));
+  const title = document.querySelector(`[data-section="${section}"] .posCatalog_name`).getAttribute('title');
+  const prev = document.querySelector('.prev_title');
+  prev.title = title; prev.textContent = title;
+  document.getElementById('iframe').src = '/knowledge/cards?section=' + section;
+  probe.log.push('open:' + section);
+}
+if (new URLSearchParams(location.search).get('collapsed') === '1') document.body.classList.add('collapsed');
+document.querySelector('#selector .switchbtn').addEventListener('click', trusted(() => {
+  document.body.classList.toggle('collapsed');
+  probe.log.push(document.body.classList.contains('collapsed') ? 'catalog-close' : 'catalog-open');
+}));
+document.getElementById('coursetree').addEventListener('click', trusted((e) => {
+  const item = e.target.closest('.posCatalog_select');
+  if (item && item.dataset.section) open(item.dataset.section);
+}));
+open('A');
+</script>
+</body>
+</html>

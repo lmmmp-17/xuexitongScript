@@ -26,6 +26,8 @@ export const defaults = {
     actionTimeoutMs: 15000,             /* 单个 Playwright 操作的上限，默认是不限 */
     pollIntervalMs: 1200,
     videoWaitMs: 8000,              /* 等播放器把 video 元素装出来 */
+    jobsWaitMs: 6000,               /* 等卡片 frame 里的任务点装出来 */
+    sectionSwitchWaitMs: 8000,      /* 点完目录后等激活项变过去 */
     guardNoProgressMs: 8000,
     resumeCooldownMs: 2500,
     sectionPauseMs: [2600, 9000],
@@ -44,7 +46,7 @@ export const defaults = {
 const NUMBERS = new Set([
     'cdpPort', 'playbackRate', 'playbackRateJitter', 'maxSections', 'maxChapterTestTries',
     'treeTimeoutMs', 'pollIntervalMs', 'guardNoProgressMs', 'resumeCooldownMs', 'longBreakChance',
-    'maxStepSwitchTries', 'videoWaitMs', 'actionTimeoutMs',
+    'maxStepSwitchTries', 'videoWaitMs', 'actionTimeoutMs', 'jobsWaitMs', 'sectionSwitchWaitMs',
 ]);
 const FLAGS = new Set([
     'allowScriptedPlay', 'resumeWhileHidden', 'autoAdvanceNoVideo', 'idleActivity',
