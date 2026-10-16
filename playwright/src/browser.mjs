@@ -40,7 +40,7 @@ async function loadPlaywright() {
  *   AutomationControlled 关掉之后 navigator.webdriver 才是 false
  *   viewport: null    跟随真实窗口尺寸，不要那个固定的 1280x720
  */
-export function launchOptions() {
+export function launchOptions({ mute = true } = {}) {
     return {
         channel: 'chrome',
         headless: false,
@@ -51,6 +51,10 @@ export function launchOptions() {
         args: [
             '--disable-blink-features=AutomationControlled',
             '--start-maximized',
+            /* 自己启动的专用 profile 顺手在浏览器这一层也静音: 页面读不到它
+             * (muted / volume 都不变), 只是声音不送到声卡。Playwright 只在
+             * 无头模式才默认带这一项。connect 模式管不到启动参数, 靠播放器上的静音。 */
+            ...(mute ? ['--mute-audio'] : []),
         ],
     };
 }
@@ -62,7 +66,7 @@ export async function openBrowser(config, log) {
         /* profile 目录按绝对路径传，不然换个工作目录就换了一个 profile */
         const profileDir = resolve(config.profileDir);
         log.say(`启动本机 Chrome，profile: ${profileDir}`);
-        const context = await chromium.launchPersistentContext(profileDir, launchOptions());
+        const context = await chromium.launchPersistentContext(profileDir, launchOptions({ mute: config.mute }));
         /* Playwright 的默认操作超时是“不限”，元素一直不出现就会无声地挂住 */
         context.setDefaultTimeout(config.actionTimeoutMs);
         return {

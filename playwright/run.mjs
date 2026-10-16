@@ -70,7 +70,16 @@ async function main() {
         }
 
         runner = new CourseRunner({ page, pointer, config, log });
-        await runner.run();
+        try {
+            await runner.run();
+        } catch (error) {
+            /* 切节、等待这些步骤里课程页被关掉时报一句人话, 不甩一串 Playwright 错误 */
+            if (page.isClosed()) {
+                log.warn('课程页被关闭了，已停下。重新打开课程页后再运行即可。');
+                return 1;
+            }
+            throw error;
+        }
         return 0;
     } finally {
         process.off('SIGINT', shutdown);

@@ -52,6 +52,7 @@ configs: {
     playbackRate: 1,          // 默认不改倍速
     playbackRateJitter: 0,
     autoplay: true,
+    mute: true,               // 起播前静音；要外放改成 false
     retryInterval: 2000,      // 下面这些时间值都是基准，实际执行时会抖动
     maxRetries: 10,
     videoCheckInterval: 1000,
@@ -68,7 +69,7 @@ configs: {
     idleActivityMs: [18000, 55000],
     backgroundResumeDelayMs: [1200, 4200],
     blockWindowLeavePause: false,
-    unmuteAfterStart: true,
+    unmuteAfterStart: true,   // 只在 mute 为 false 时生效
     quietVolume: 0.04,
     resumeWhileHidden: true,
     logLevel: 'quiet',
@@ -78,6 +79,8 @@ configs: {
 ### 3. 视频结束后
 
 视频触发结束事件后，脚本会先停一段随机时间（默认 2.6～9 秒，并有约 12% 的概率停 20～70 秒），再调用 `nextUnit()`，在课程目录树中定位到下一小节并点击进入。
+
+目录上标了任务点时（新版 mooc2 页面），“下一小节”指的是**下一个还有待完成任务点的小节**：已完成的、0 个任务点的小节都直接越过，不会一节一节点过去。视频不算任务点（卡片上没有任务点图标）的小节同样不播。整个目录都没有任务点标记的旧页面仍按顺序切换。
 
 ### 4. 章节测验
 
@@ -130,7 +133,7 @@ app.destroy()
 | 全局变量 | 固定的 `window.app` + `window.__xuexitongPlayerV3` | 只挂在每次运行随机生成的、不可枚举的名字下，实例标记改用 `Symbol` |
 | 切后台 | `blur` / `visibilitychange` 的同一毫秒内把视频按回播放 | 延迟 1.2～4.2 秒再恢复；`resumeWhileHidden: false` 可改成后台期间完全不动播放状态 |
 | 鼠标事件拦截 | 捕获阶段对页面的 `mouseout` / `mouseleave` 调 `stopPropagation()` | 默认关闭（`blockWindowLeavePause`）。拦截页面自身的事件既会掐断学习通的菜单和悬浮提示，“指针移出窗口后视频一次都不暂停”本身也是异常 |
-| 静音状态 | 静音起播后一直挂着 `muted` | 起播成功后退出静音并压到 `quietVolume`（默认 0.04），听感上仍约等于静音；若因此被打断则回退静音 |
+| 静音状态 | 静音起播后一直挂着 `muted` | 默认 `mute: true`，起播前就静音，全程不出声。改成 `false` 后才会在静音起播成功后退出静音并压到 `quietVolume`（默认 0.04）；若因此被打断则回退静音 |
 | 输入事件 | 整节课零输入事件 | 播放期间每 18～55 秒产生几次指针微动（`idleActivity`），不改变页面状态、不碰滚动位置 |
 | 启动时机 | 页面就绪的同一毫秒立刻动手 | 先等 1.2～5.5 秒的“反应时间”，轮询间隔同样抖动 |
 | 控制台 | 成片的彩色大字横幅 | 默认 `logLevel: 'quiet'` 只打印关键状态；`'silent'` 连状态行也不打印。日志走启动时抓下来的原生 `console` 引用 |

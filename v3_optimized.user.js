@@ -629,6 +629,8 @@
                 playbackRate: 1,
                 playbackRateJitter: 0,
                 autoplay: true,
+                /* 起播前静音, 一点声音都不出。要外放就在控制台把它改成 false */
+                mute: true,
                 retryInterval: 2000,
                 maxRetries: 10,
                 videoCheckInterval: 1000,
@@ -646,7 +648,7 @@
                 idleActivityMs: [18000, 55000],
                 backgroundResumeDelayMs: [1200, 4200],  /* 失焦/切回后的恢复延迟 */
                 blockWindowLeavePause: false,           /* 不再拦截页面自身的鼠标事件 */
-                unmuteAfterStart: true,                 /* 静音起播后退出静音并压到极低音量 */
+                unmuteAfterStart: true,                 /* 静音起播后退出静音并压到极低音量(只在 mute 为 false 时生效) */
                 quietVolume: 0.04,
                 resumeWhileHidden: true,                /* 关掉后页面在后台就不碰播放状态 */
                 /* silent 连状态行都不打印（warn / error 仍保留，排障用） */
@@ -748,28 +750,77 @@
                 this._note('%c准备切换到下一小节', 'color:#2196F3');
                 try {
                     const el = this._getTreeContainer();
-                    const cells = el.children("ul").children("li");
-                    const nCells = dom.select(cells.get(this._cellData.currentCellIndex)).find('.posCatalog_select:not(.firstLayer)');
-
-                    if (nCells.length > this._cellData.currentNCellIndex + 1) {
-                        const nextNIndex = this._cellData.currentNCellIndex + 1;
-                        this._note(`%c切换到同章节下一个视频: ${nextNIndex + 1}/${nCells.length}`, 'color:#FF9800');
-                        this.playCurrentIndex(nCells.get(nextNIndex));
-                    } else {
-                        const nextIndex = this._cellData.currentCellIndex + 1;
-                        if (nextIndex >= cells.length) {
-                            this._say('%c本课程已全部播放完成', 'color:#4CAF50;font-weight:bold');
-                            return;
+                    const sections = [];
+                    el.children("ul").children("li").each((i, cell) => {
+                        dom.select(cell).find('.posCatalog_select:not(.firstLayer)').each((j, section) => {
+                            sections.push({
+                                el: section,
+                                cell: i,
+                                n: j,
+                                active: dom.select(section).hasClass('posCatalog_active'),
+                                pending: this._sectionPending(section),
+                            });
+                        });
+                    });
+                    /* 目录上没有激活项时退回上次记下的位置 */
+                    if (!sections.some((section) => section.active)) {
+                        for (const section of sections) {
+                            section.active = section.cell === this._cellData.currentCellIndex
+                                && section.n === this._cellData.currentNCellIndex;
                         }
-                        this._note(`%c切换到下一个章节: ${nextIndex + 1}/${cells.length}`, 'color:#FF9800');
-                        this._cellData.currentCellIndex = nextIndex;
-                        this._cellData.currentNCellIndex = 0;
-                        this.playCurrentIndex();
                     }
+
+                    const { index, skipped, marked } = this._pickNextSection(sections);
+                    if (index < 0) {
+                        this._nextUnitPending = false;
+                        this._say(marked ? '%c后面没有待完成任务点的小节了，课程完成' : '%c本课程已全部播放完成', 'color:#4CAF50;font-weight:bold');
+                        return;
+                    }
+                    const target = sections[index];
+                    if (skipped) {
+                        this._note(`%c跳过中间 ${skipped} 个没有待完成任务点的小节`, 'color:#FF9800');
+                    }
+                    this._cellData.currentCellIndex = target.cell;
+                    this._cellData.currentNCellIndex = target.n;
+                    this.playCurrentIndex(target.el);
                 } catch (error) {
                     this._nextUnitPending = false;
                     log.error('切换下一小节失败:', error);
                 }
+            },
+            /* 从当前小节往后找下一节要去的, 返回它在 sections 里的下标(没有为 -1)。
+             * 和 Playwright 版 pickNextSection 是同一套规则:
+             * 目录上有任务点标记时(mooc2)直接跳到下一个还有待完成任务点的小节——不算
+             * 任务点的视频不播, 已完成的也不重放, 一节节点过去只是在目录上连点几十下
+             * (实测一门课里 1.3 到 8.1 之间 36 节全是 0 个任务点)。标记读不出来的
+             * 小节当作"要进去看看"; 整个目录都没有标记(旧布局)时按顺序取下一节。
+             * sections: [{ active, pending }], pending 为 null 表示没有标记。 */
+            _pickNextSection(sections) {
+                const at = sections.findIndex((section) => section.active);
+                const rest = sections.slice(at + 1);
+                const marked = sections.some((section) => section.pending !== null && section.pending !== undefined);
+                if (!marked) return { index: rest.length ? at + 1 : -1, skipped: 0, marked };
+                const offset = rest.findIndex((section) => section.pending === null || section.pending === undefined || section.pending > 0);
+                return { index: offset >= 0 ? at + 1 + offset : -1, skipped: offset >= 0 ? offset : rest.length, marked };
+            },
+            /* 目录上标的待完成任务点数(实测 mooc2): 待完成的带
+             * <input type="hidden" class="jobUnfinishCount" value="N">, 完成的带 .icon_Completed,
+             * 没有任务点的只有 .catalog_points_yi 里一个 <span class="orangeNew">0</span>。
+             * 读不出来返回 null */
+            _sectionPending(section) {
+                if (!section || typeof section.querySelector !== 'function') return null;
+                const unfinished = section.querySelector('.jobUnfinishCount');
+                if (unfinished) {
+                    const count = parseInt(unfinished.value || unfinished.getAttribute('value'), 10);
+                    if (Number.isFinite(count)) return count;
+                }
+                if (section.querySelector('.icon_Completed')) return 0;
+                const points = section.querySelector('.catalog_points_yi .orangeNew');
+                if (points) {
+                    const count = parseInt(points.textContent, 10);
+                    if (Number.isFinite(count)) return count;
+                }
+                return null;
             },
             _clearCheckInterval() {
                 if (this._checkInterval) {
@@ -839,8 +890,15 @@
             /* 长时间挂着 muted 也是容易被单独筛出来的状态。静音起播成功后退出静音、
              * 改用极低音量——听感上仍然约等于静音，但 muted 标记不再立着。
              * 若退出静音导致播放被打断，再回退到静音继续。 */
+            /* 默认静音: 每次要调 play() 之前都过一遍 */
+            _muteIfNeeded(video) {
+                if (!this.configs.mute || !video || video.muted) return;
+                video.muted = true;
+                this._note('%c已静音', 'color:#607D8B');
+            },
             _scheduleUnmute() {
-                if (!this.configs.unmuteAfterStart) return;
+                /* 默认静音时绝不自己退出静音: 0.04 的音量在安静的教室里也听得见 */
+                if (this.configs.mute || !this.configs.unmuteAfterStart) return;
                 this._delay(() => {
                     const video = this._getVideoEl();
                     if (!video || !this._isPlaying || video.paused || !video.muted) return;
@@ -899,6 +957,8 @@
                 }
 
                 this._note(`%c触发视频保活恢复(${reason})`, 'color:#607D8B');
+                /* 平台中途重建过 video 元素时, 新元素不带静音, 直接 play() 会外放 */
+                this._muteIfNeeded(video);
                 video.play().catch((e) => {
                     log.warn('直接恢复播放失败，尝试静音恢复:', e);
                     video.muted = true;
@@ -969,7 +1029,9 @@
                         throw new Error('卡片还没加载到当前小节');
                     }
                     const pendingVideo = jobs ? jobs.some((job) => job.kind === 'video' && !job.finished) : false;
-                    if (jobs && jobs.length && !pendingVideo) {
+                    /* 视频不是任务点(卡片上没有 .ans-job-icon, 实测 mArg 里也没有 job 字段)
+                     * 时 jobs 是空数组, 同样不播: 不计入完成度的视频按约定跳过 */
+                    if (jobs && !pendingVideo) {
                         this._handleNoPendingVideo(jobs);
                         return;
                     }
@@ -1009,6 +1071,8 @@
 
                     this._isPlaying = true;
                     this._videoEventHandle();
+                    /* 必须在 play() 之前, 否则会先外放一两秒 */
+                    this._muteIfNeeded(el);
                     const rate = this._applyPlaybackRate(el);
 
                     try {
@@ -1291,14 +1355,14 @@
                     return null;
                 }
             },
-            /* 本节没有待播的视频: 视频要么没有、要么已完成 */
+            /* 本节没有待播的视频: 视频要么没有、要么已完成、要么不是任务点 */
             _handleNoPendingVideo(jobs) {
                 this._isPlaying = false;
                 this._clearCheckInterval();
                 const pendingOther = jobs ? jobs.filter((job) => job.kind !== 'video' && !job.finished).length : 0;
                 const rest = pendingOther
                     ? `还剩 ${pendingOther} 个非视频任务点(章节测验等)需要你自己完成`
-                    : '本节任务点已全部完成';
+                    : (jobs && !jobs.length ? '本节没有任务点' : '本节任务点已全部完成');
                 if (this.configs.autoAdvanceNoVideo || !pendingOther) {
                     this._say(`%c本节没有待播的视频, ${rest}, 切到下一节`, 'color:#607D8B');
                     this.nextUnit();

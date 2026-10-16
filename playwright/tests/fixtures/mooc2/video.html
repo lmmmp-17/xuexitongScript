@@ -40,6 +40,8 @@ const start = (via) => (e) => {
   probe.realPlayClicks += 1; probe.log.push('play:' + via + ':' + params.get('section'));
   paused = false; root.classList.add('vjs-has-started'); sync();
 };
+/* 静音必须发生在起播之前: 记下顺序, 测试里比较 */
+video.addEventListener('volumechange', () => { if (video.muted) probe.log.push('muted:' + params.get('section')); });
 document.querySelector('.vjs-big-play-button').addEventListener('click', start('big'));
 document.querySelector('.vjs-play-control').addEventListener('click', start('control'));
 setInterval(() => {

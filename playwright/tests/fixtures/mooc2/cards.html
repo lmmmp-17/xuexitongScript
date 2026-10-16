@@ -15,16 +15,21 @@ const SECTIONS = {
   A: { video: { finished: true, at: 'end' }, work: { finished: false } },
   B: { video: { finished: false, at: 'start' }, work: null },
   C: { video: { finished: true, at: 'end' }, work: { finished: true } },
+  /* 视频不是任务点: 实测 .ans-attach-ct.videoContainer 里没有 .ans-job-icon */
+  D: { video: { finished: false, at: 'start', job: false }, work: null },
+  E: { video: { finished: false, at: 'start', job: false }, work: null },
 };
 const section = new URLSearchParams(location.search).get('section');
 const spec = SECTIONS[section];
 const add = (kind, job) => {
   const ct = document.createElement('div');
   ct.className = 'ans-attach-ct' + (kind === 'video' ? ' videoContainer' : '') + (job.finished ? ' ans-job-finished' : '');
-  const icon = document.createElement('div');
-  icon.className = 'ans-job-icon' + (kind === 'video' ? ' ans-job-video' : '');
-  icon.setAttribute('aria-label', job.finished ? '任务点已完成' : '任务点未完成');
-  ct.appendChild(icon);
+  if (job.job !== false) {
+    const icon = document.createElement('div');
+    icon.className = 'ans-job-icon' + (kind === 'video' ? ' ans-job-video' : '');
+    icon.setAttribute('aria-label', job.finished ? '任务点已完成' : '任务点未完成');
+    ct.appendChild(icon);
+  }
   const frame = document.createElement('iframe');
   frame.width = kind === 'video' ? 844 : 600;
   frame.height = kind === 'video' ? 474 : 120;

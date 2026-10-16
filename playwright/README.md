@@ -26,16 +26,18 @@ npm install
 
 ```bash
 # Linux
-google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" &
+google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --mute-audio &
 
 # macOS
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" &
+  --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --mute-audio &
 
 # Windows
 "%ProgramFiles%\Google\Chrome\Application\chrome.exe" ^
-  --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome"
+  --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome" --mute-audio
 ```
+
+`--mute-audio` 让这个专用实例整个不出声，页面读不到它。脚本默认也会在播放器上静音，这一项是兜底。
 
 记不住就运行 `node run.mjs`，连不上时它会打印当前平台对应的那一条。
 
@@ -95,6 +97,10 @@ Node 和 `playwright-core` 本身三平台通用。需要分平台处理的只�
 - **轮询**：进度查询每轮重新抽间隔，不踩整秒。
 - **倍速**：默认 1，且一次都不写 `playbackRate`。
 - **指针微动**：播放期间每 18–55 秒动一下。
+
+起播前先静音（默认，`--no-mute` 关掉）。真实播放器上的静音按钮只有 40×2 像素，外面还套着悬停弹出的音量条，真实点击容易落到音量条上，所以这一步是直接把 `muted` 设上，并且一定在第一次点播放之前做，不会先外放一两秒。
+
+切节时，目录上标了任务点的页面会直接跳到**下一个还有待完成任务点的小节**，已完成的和 0 个任务点的小节都不进去。视频不算任务点的小节不播。
 
 起播优先**真实点击播放按钮**（`.vjs-big-play-button`），而不是调 `video.play()`：前者是人本来就会做的操作，也顺便拿到用户激活，不会被 autoplay 策略拦。只有真实点击都失败时才退回 `video.play()`，并在日志里说明这一步是脚本调用（`--no-allow-scripted-play` 可以完全禁止）。
 

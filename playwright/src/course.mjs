@@ -12,6 +12,23 @@
 import { SEL } from './selectors.mjs';
 import { human, sleep, sleepFor } from './human.mjs';
 
+/* 从当前小节往后找下一节要去的。
+ *
+ * 目录上有任务点标记时(mooc2)直接跳到下一个还有待完成任务点的小节: 不算任务点的
+ * 视频不播, 已完成的也不重放, 一节节点过去只是在目录上连点几十下(实测一门课里
+ * 1.3 到 8.1 之间 36 节全是 0 个任务点)。标记读不出来的小节当作"要进去看看"。
+ * 整个目录都没有标记(旧布局)时按顺序取下一节。 */
+export function pickNextSection(tree) {
+    const flat = tree.chapters.flatMap((chapter) => chapter.sections);
+    const at = flat.findIndex((section) => section.chapterIndex === tree.current.chapterIndex
+        && section.sectionIndex === tree.current.sectionIndex);
+    const rest = flat.slice(at + 1);
+    const marked = flat.some((section) => section.pending !== null && section.pending !== undefined);
+    if (!marked) return { target: rest[0] || null, skipped: 0, marked };
+    const index = rest.findIndex((section) => section.pending === null || section.pending === undefined || section.pending > 0);
+    return { target: index >= 0 ? rest[index] : null, skipped: index >= 0 ? index : rest.length, marked };
+}
+
 export class CourseRunner {
     constructor({ page, pointer, config, log }) {
         this.page = page;
@@ -20,9 +37,11 @@ export class CourseRunner {
         this.log = log;
         this.stopped = false;
         this.lastDriftAt = Date.now();
+        this.nextDriftAt = null;
         this.chapterTestTries = 0;
         this.stepSwitchTries = 0;
         this.sectionsDone = 0;
+        this.lostTries = 0;
     }
 
     stop(reason) {
@@ -38,9 +57,24 @@ export class CourseRunner {
         this.log.say('已找到课程目录');
     }
 
-    /* 目录结构一次读出来，纯只读 */
+    /* 目录结构一次读出来，纯只读。pending 是目录上标的待完成任务点数，
+     * 没有标记(旧布局)时为 null */
     async readTree() {
         return this.page.evaluate((sel) => {
+            const pendingOf = (section) => {
+                const unfinished = section.querySelector(sel.sectionUnfinished);
+                if (unfinished) {
+                    const count = parseInt(unfinished.value || unfinished.getAttribute('value'), 10);
+                    if (Number.isFinite(count)) return count;
+                }
+                if (section.querySelector(sel.sectionCompleted)) return 0;
+                const points = section.querySelector(sel.sectionPoints);
+                if (points) {
+                    const count = parseInt(points.textContent, 10);
+                    if (Number.isFinite(count)) return count;
+                }
+                return null;
+            };
             const chapters = Array.from(document.querySelectorAll(sel.chapter)).map((chapter, chapterIndex) => {
                 const sections = Array.from(chapter.querySelectorAll(sel.section)).map((section, sectionIndex) => {
                     const name = section.querySelector(sel.sectionName);
@@ -49,6 +83,7 @@ export class CourseRunner {
                         sectionIndex,
                         title: ((name && name.getAttribute('title')) || (name && name.textContent) || '').trim(),
                         active: section.classList.contains('posCatalog_active'),
+                        pending: pendingOf(section),
                     };
                 });
                 return { chapterIndex, sections };
@@ -181,9 +216,27 @@ export class CourseRunner {
         }
     }
 
+    /* 起播前静音。
+     *
+     * 实测播放器上的静音按钮 .vjs-mute-control 只有 40x2 像素(图标画在伪元素上),
+     * 外面还套着悬停就弹出的竖向音量条, 真实点击很容易落到音量条上——那就成了
+     * "调了一下音量"而不是静音。所以直接把 muted 设上: 页面只会收到一个普通的
+     * volumechange, 播放器自己的按钮也会跟着变成静音状态。
+     * 必须在任何一次起播点击之前做, 否则会先外放一两秒。 */
+    async ensureMuted(video) {
+        if (!this.config.mute) return;
+        const changed = await video.locator.evaluate((el) => {
+            if (el.muted) return false;
+            el.muted = true;
+            return true;
+        }).catch(() => false);
+        if (changed) this.log.note('已静音');
+    }
+
     /* 起播优先用真实点击：播放器的大播放按钮本来就是给人点的，
      * 点它既能拿到用户激活（不会被 autoplay 策略拦），行为也最普通。 */
     async startPlayback(video) {
+        await this.ensureMuted(video);
         const atEnd = (state) => state && (state.ended || (state.duration > 0 && state.currentTime >= state.duration - 0.4));
         const before = await this.videoState(video);
         if (before && !before.paused && before.currentTime > 0) {
@@ -259,16 +312,25 @@ export class CourseRunner {
 
             let state = await this.videoState(video);
             if (!state) {
+                /* 实测: 播放中标签页被关掉(再恢复出来的是另一个页面对象)。以前这里会当成
+                 * "本节结束", 计一节完成、歇一会儿再去点下一节, 然后在已关闭的页面上报错。 */
+                if (this.page.isClosed()) {
+                    this.log.warn('课程页被关闭了，已停下。本节没有算作完成；重新打开课程页后再运行即可。');
+                    this.stop('课程页已关闭');
+                    return 'stopped';
+                }
                 /* frame 可能因为切节点被换掉了，重新找一次 */
                 const again = await this.findVideo();
                 if (!again) {
-                    this.log.warn('视频元素消失，当前小节的监控结束');
+                    this.log.warn('视频元素消失，回到本节重新判断');
                     return 'lost';
                 }
                 video.frame = again.frame;
                 video.locator = again.locator;
                 state = await this.videoState(video);
                 if (!state) return 'lost';
+                /* 换了一个 video 元素, 静音状态不会跟过来 */
+                await this.ensureMuted(video);
             }
 
             const nearEnd = state.duration > 0 && state.currentTime >= state.duration - 0.4;
@@ -302,9 +364,13 @@ export class CourseRunner {
 
     async maybeDrift() {
         if (!this.config.idleActivity) return;
-        const due = this.lastDriftAt + human.ms(this.config.idleActivityMs);
-        if (Date.now() < due) return;
+        /* 下一次的时间点只在上一次之后抽一次。以前每轮轮询(约 1.2 秒)都重抽一个
+         * 阈值, 等于在几十次抽签里取最先满足的那个: 实测间隔全挤在 22–26 秒,
+         * 18–55 秒的区间成了一个固定节拍。 */
+        if (this.nextDriftAt === null) this.nextDriftAt = this.lastDriftAt + human.ms(this.config.idleActivityMs);
+        if (Date.now() < this.nextDriftAt) return;
         this.lastDriftAt = Date.now();
+        this.nextDriftAt = this.lastDriftAt + human.ms(this.config.idleActivityMs);
         try {
             await this.pointer.drift();
             this.log.trace('指针微动');
@@ -400,23 +466,14 @@ export class CourseRunner {
             this.log.warn('目录里找不到当前激活的小节，需要先手动点开一节');
             return false;
         }
-        const chapter = tree.chapters[tree.current.chapterIndex];
-        let target = chapter.sections[tree.current.sectionIndex + 1] || null;
+        const { target, skipped, marked } = pickNextSection(tree);
         if (!target) {
-            for (let i = tree.current.chapterIndex + 1; i < tree.chapters.length; i += 1) {
-                if (tree.chapters[i].sections.length > 0) {
-                    [target] = tree.chapters[i].sections;
-                    break;
-                }
-            }
-        }
-        if (!target) {
-            this.log.say('已经是最后一节，课程播放完成');
+            this.log.say(marked ? '后面没有待完成任务点的小节了，课程完成' : '已经是最后一节，课程播放完成');
             return false;
         }
 
         const name = target.title || `第${target.chapterIndex + 1}章第${target.sectionIndex + 1}节`;
-        this.log.say(`切换到：${name}`);
+        this.log.say(skipped ? `切换到：${name}（跳过中间 ${skipped} 个没有待完成任务点的小节）` : `切换到：${name}`);
         const locator = this.sectionLocator(target);
 
         /* 以前点完就当切过去了。实测目录侧栏收起时点击落在视口外, 页面纹丝不动,
@@ -479,14 +536,19 @@ export class CourseRunner {
             let video = await this.findVideoWithWait(waitMs);
             if (this.stopped) return;
 
+            /* 视频不是任务点(卡片上没有 .ans-job-icon, 实测 mArg 里也没有 job 字段)
+             * 时同样不播: 不计入完成度的视频按约定跳过 */
             if (video && (video.finished === true || (jobs && !pendingVideo))) {
-                this.log.note('本节视频任务点已经完成, 不再重放');
+                const videoIsJob = video.finished === true || jobs.some((job) => job.kind === 'video');
+                this.log.note(videoIsJob ? '本节视频任务点已经完成, 不再重放' : '本节的视频不算任务点, 不播');
                 video = null;
             }
 
             if (!video && jobs && !pendingVideo) {
-                /* 新布局: 视频要么没有、要么已完成, 剩下的是测验等非视频任务点 */
-                const rest = pendingOther ? `还剩 ${pendingOther} 个非视频任务点(章节测验等)需要你自己完成` : '本节任务点已全部完成';
+                /* 新布局: 视频要么没有、要么已完成、要么不是任务点, 剩下的是测验等非视频任务点 */
+                const rest = pendingOther
+                    ? `还剩 ${pendingOther} 个非视频任务点(章节测验等)需要你自己完成`
+                    : (jobs.length ? '本节任务点已全部完成' : '本节没有任务点');
                 if (!this.config.autoAdvanceNoVideo && pendingOther) {
                     this.log.warn(`本节没有待播的视频, ${rest}。已停下; 确认后加 --auto-advance-no-video 可自动跳到下一节。`);
                     return;
@@ -531,7 +593,23 @@ export class CourseRunner {
 
             const result = await this.watchUntilEnd(video);
             if (result === 'stopped') return;
+            /* 视频元素没了(页面还在)不等于放完: 回到循环开头重新读本节任务点,
+             * 视频还没完成就接着放。连续两次这样就停下, 不原地打转。 */
+            if (result === 'lost') {
+                this.lostTries += 1;
+                if (this.lostTries >= 2) {
+                    this.log.warn('视频连续两次在播放中消失，已停下，请看一眼浏览器');
+                    return;
+                }
+                continue;
+            }
+            this.lostTries = 0;
             this.sectionsDone += 1;
+            /* 到了上限就停在这一节, 不先点进下一节再停 */
+            if (this.config.maxSections > 0 && this.sectionsDone >= this.config.maxSections) {
+                this.log.say(`已完成 ${this.sectionsDone} 节，达到 --max-sections 上限`);
+                return;
+            }
 
             await this.sectionPause();
             if (this.stopped) return;

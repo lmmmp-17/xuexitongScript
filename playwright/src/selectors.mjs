@@ -9,6 +9,12 @@ export const SEL = {
     section: '.posCatalog_select:not(.firstLayer)',
     sectionName: '.posCatalog_name',
     activeSection: '.posCatalog_active',
+    /* 目录上的任务点标记(实测 mooc2): 有待完成任务点的小节带
+     * <input type="hidden" class="jobUnfinishCount" value="N">, 完成的带 .icon_Completed,
+     * 没有任务点的只有 .catalog_points_yi 里一个 <span class="orangeNew">0</span> */
+    sectionUnfinished: '.jobUnfinishCount',
+    sectionCompleted: '.icon_Completed',
+    sectionPoints: '.catalog_points_yi .orangeNew',
     stepTab: '.prev_white',
     stepTitle: '.prev_title',
     testNext: '#prevNextFocusNext, #right1, .nextChapter',

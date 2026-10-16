@@ -253,6 +253,36 @@ assert.equal(mouseup.clientX, click.clientX, 'mouseup 与 click 坐标应一致'
 assert.equal(click.movementX, 0, 'click 不应带指针位移');
 assert.equal(click.movementY, 0, 'click 不应带指针位移');
 
+/* 默认静音, 且不会在静音起播后自己退出静音 */
+assert.equal(app.configs.mute, true, '默认应当静音');
+let unmuteScheduled = false;
+const realDelay = app._delay;
+app._delay = (...args) => { unmuteScheduled = true; return realDelay.apply(app, args); };
+app._scheduleUnmute();
+app._delay = realDelay;
+assert.equal(unmuteScheduled, false, '默认静音时不应安排退出静音');
+const loudVideo = { muted: false };
+app._muteIfNeeded(loudVideo);
+assert.equal(loudVideo.muted, true, '起播前应当静音');
+app.configs.mute = false;
+const wantedSound = { muted: false };
+app._muteIfNeeded(wantedSound);
+assert.equal(wantedSound.muted, false, 'mute 关掉后不应动静音状态');
+app.configs.mute = true;
+
+/* 切节: 目录上有任务点标记时跳到下一个有待完成任务点的小节(和 Playwright 版同一套规则) */
+const marks = (list) => list.map(([pending, active = false]) => ({ pending, active }));
+let next = app._pickNextSection(marks([[0, true], [0], [0], [1], [0]]));
+assert.deepEqual([next.index, next.skipped], [3, 2], '应当越过 0 个任务点的小节');
+next = app._pickNextSection(marks([[1, true], [0], [0]]));
+assert.deepEqual([next.index, next.marked], [-1, true], '后面都没有待完成的应当收尾');
+next = app._pickNextSection(marks([[0, true], [0], [null], [1]]));
+assert.equal(next.index, 2, '读不出标记的小节要进去看看');
+next = app._pickNextSection(marks([[null, true], [null], [null]]));
+assert.deepEqual([next.index, next.marked], [1, false], '旧布局没有标记时按顺序');
+next = app._pickNextSection(marks([[null], [null, true]]));
+assert.equal(next.index, -1, '最后一节之后没有下一节');
+
 /* destroy() 之后不应再留下全局名和待执行的回调 */
 app.destroy();
 await sleep(200);
@@ -260,4 +290,4 @@ const afterDestroy = span.events.length;
 await sleep(400);
 assert.equal(span.events.length, afterDestroy, 'destroy() 后不应再派发事件');
 
-console.log('行为伪装冒烟测试通过：随机句柄、完整点击序列、抖动等待、默认不改倍速。');
+console.log('行为伪装冒烟测试通过：随机句柄、完整点击序列、抖动等待、默认不改倍速、默认静音、按任务点切节。');

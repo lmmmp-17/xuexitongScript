@@ -14,6 +14,7 @@ export const defaults = {
     playbackRate: 1,                    /* 默认不改倍速 */
     playbackRateJitter: 0,
     allowScriptedPlay: true,            /* 真实点击起播失败时才退回 video.play() */
+    mute: true,                         /* 起播前静音, 一点声音都不出; --no-mute 关掉 */
     resumeWhileHidden: true,
     autoAdvanceNoVideo: false,
     maxSections: 0,                     /* 0 = 不限 */
@@ -49,7 +50,7 @@ const NUMBERS = new Set([
     'maxStepSwitchTries', 'videoWaitMs', 'actionTimeoutMs', 'jobsWaitMs', 'sectionSwitchWaitMs',
 ]);
 const FLAGS = new Set([
-    'allowScriptedPlay', 'resumeWhileHidden', 'autoAdvanceNoVideo', 'idleActivity',
+    'allowScriptedPlay', 'resumeWhileHidden', 'autoAdvanceNoVideo', 'idleActivity', 'mute',
 ]);
 
 const camel = (name) => name.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
@@ -126,6 +127,7 @@ export const helpText = `
   --check                 只做特征自检并退出，不动课程进度
   --inspect               只读检查课程页结构(目录、学习步骤、播放器、弹出物)，
                           适配页面改版时先跑它；不点击、不播放
+  --no-mute               起播时不静音（默认静音：起播前就把播放器设成静音，不会外放）
   --playback-rate <倍速>  默认 1（不写 playbackRate）
   --playback-rate-jitter <幅度>
   --max-sections <n>      最多播放多少节，默认不限

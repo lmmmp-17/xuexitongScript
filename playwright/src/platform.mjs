@@ -30,11 +30,15 @@ export function sideProfilePath() {
  * Chrome 已经在运行时，再执行一次 chrome --remote-debugging-port=9222 并不会
  * 开出调试端口——参数会被转交给已有实例，命令直接返回，端口上什么都没有。
  * 要么先把 Chrome 完全退出，要么像下面这样用另一个 profile 目录开一个独立实例。
- * 独立目录第一次需要登录一次学习通，之后登录态就一直留在那个目录里。 */
+ * 独立目录第一次需要登录一次学习通，之后登录态就一直留在那个目录里。
+ *
+ * --mute-audio 让这个专用实例整个不出声(页面读不到它)。脚本默认也会在播放器上
+ * 静音，这一项是兜底: 实测在教室里外放过一次。 */
 export function chromeLaunchHint(port) {
     const flags = [
         `--remote-debugging-port=${port}`,
         `--user-data-dir="${sideProfilePath()}"`,
+        '--mute-audio',
     ];
     if (process.platform === 'win32') {
         return `${chromeCommand()} ${flags.join(' ')}`;

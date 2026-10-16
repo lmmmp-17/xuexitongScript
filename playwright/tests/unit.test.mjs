@@ -5,7 +5,7 @@ import { human } from '../src/human.mjs';
 import { createPointer } from '../src/pointer.mjs';
 import { parseArgs, defaults } from '../src/config.mjs';
 import { isAllowedUrl } from '../src/selectors.mjs';
-import { CourseRunner } from '../src/course.mjs';
+import { CourseRunner, pickNextSection } from '../src/course.mjs';
 import { createLogger } from '../src/logger.mjs';
 import { chromeLaunchHint, describePlatform } from '../src/platform.mjs';
 import { launchOptions } from '../src/browser.mjs';
@@ -88,6 +88,7 @@ test('平台提示用的是独立 profile 目录', () => {
     const hint = chromeLaunchHint(9222);
     assert.match(hint, /--remote-debugging-port=9222/);
     assert.match(hint, /--user-data-dir/);
+    assert.match(hint, /--mute-audio/);
     assert.ok(describePlatform().length > 0);
 });
 
@@ -189,6 +190,75 @@ test('切节：本章放完跳到下一章第一节，没有下一章就收尾',
     assert.equal(await last.gotoNextSection(), false, '最后一节应当返回 false');
 });
 
+test('切节：目录有任务点标记时跳到下一个有待完成任务点的小节', () => {
+    const section = (chapterIndex, sectionIndex, pending, active = false) => ({ chapterIndex, sectionIndex, title: `${chapterIndex + 1}.${sectionIndex + 1}`, active, pending });
+    const tree = (sections) => {
+        const chapters = [0, 1].map((chapterIndex) => ({ chapterIndex, sections: sections.filter((s) => s.chapterIndex === chapterIndex) }));
+        return { chapters, current: sections.find((s) => s.active), total: sections.length };
+    };
+
+    /* 实测结构: 1.2 有 1 个待完成, 中间是 0 个任务点和已完成(0) */
+    let picked = pickNextSection(tree([section(0, 0, 0, true), section(0, 1, 0), section(1, 0, 0), section(1, 1, 1), section(1, 2, 0)]));
+    assert.equal(picked.target.title, '2.2');
+    assert.equal(picked.skipped, 2);
+
+    /* 后面都没有待完成的: 收尾, 不往下点 */
+    picked = pickNextSection(tree([section(0, 0, 1, true), section(0, 1, 0), section(1, 0, 0)]));
+    assert.equal(picked.target, null);
+    assert.equal(picked.marked, true);
+
+    /* 读不出标记的小节要进去看看 */
+    picked = pickNextSection(tree([section(0, 0, 0, true), section(0, 1, 0), section(1, 0, null), section(1, 1, 1)]));
+    assert.equal(picked.target.title, '2.1');
+
+    /* 整个目录都没有标记(旧布局): 按顺序 */
+    picked = pickNextSection(tree([section(0, 0, null, true), section(0, 1, null), section(1, 0, null)]));
+    assert.equal(picked.target.title, '1.2');
+    assert.equal(picked.marked, false);
+});
+
+test('默认静音, --no-mute 可以关掉', () => {
+    assert.equal(parseArgs([]).config.mute, true);
+    assert.equal(parseArgs(['--no-mute']).config.mute, false);
+});
+
+test('播放中课程页被关掉: 如实停下, 不算这一节完成', async () => {
+    /* 实测: 播放 8 秒后标签页被关掉, 以前会计一节完成、歇 43 秒再去点下一节, 最后报错退出 */
+    const page = { isClosed: () => true, frames: () => [] };
+    const runner = new CourseRunner({ page, pointer: {}, config: { ...defaults, pollIntervalMs: 5 }, log: silent });
+    const video = { frame: null, locator: { evaluate: async () => { throw new Error('Target page, context or browser has been closed'); } } };
+    assert.equal(await runner.watchUntilEnd(video), 'stopped');
+    assert.equal(runner.stopped, true);
+    assert.equal(runner.sectionsDone, 0);
+});
+
+test('指针微动的间隔铺满配置区间, 不被轮询压成固定节拍', async () => {
+    /* 实测: 每轮轮询重抽阈值时, 18–55 秒的配置跑出来全是 22–26 秒 */
+    const realNow = Date.now;
+    let now = 1_000_000;
+    Date.now = () => now;
+    try {
+        const fired = [];
+        const runner = new CourseRunner({
+            page: {},
+            pointer: { async drift() { fired.push(now); } },
+            config: { ...defaults, idleActivityMs: [18000, 55000] },
+            log: silent,
+        });
+        for (let t = 0; t < 4 * 3600 * 1000; t += 1200) {
+            now += 1200;
+            await runner.maybeDrift();
+        }
+        const gaps = fired.slice(1).map((at, i) => (at - fired[i]) / 1000);
+        const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+        assert.ok(mean > 32 && mean < 41, `平均间隔应在区间中部, 实际 ${mean.toFixed(1)} 秒`);
+        assert.ok(gaps.filter((g) => g > 45).length > gaps.length * 0.15, '应当有相当比例的长间隔');
+        assert.ok(gaps.every((g) => g >= 18 && g <= 56.5), `不应越出区间: ${Math.min(...gaps)}–${Math.max(...gaps)}`);
+    } finally {
+        Date.now = realNow;
+    }
+});
+
 test('倍速：默认一次都不写 playbackRate', async () => {
     let writes = 0;
     const video = { locator: { async evaluate() { writes += 1; return undefined; } } };
@@ -219,6 +289,8 @@ test('launch 模式的启动参数不引入新特征', () => {
         'navigator.webdriver 要靠这一项变成 false'
     );
     assert.equal(options.locale, 'zh-CN');
+    assert.ok(options.args.includes('--mute-audio'), '默认在浏览器这一层也静音');
+    assert.equal(launchOptions({ mute: false }).args.includes('--mute-audio'), false);
 });
 
 test('指针起点必须是 (0,0)，否则第一次移动会带一个瞬移位移', () => {

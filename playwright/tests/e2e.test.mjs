@@ -186,7 +186,8 @@ test('失焦之后 hasFocus 仍为 true，播放不受影响', async (t) => {
 
 /* ------------------------------------------------------------------
  * 新布局(mooc2): 照真实页面实测的结构。
- * 1.1 视频已完成、只剩章节测验; 1.2 视频没看完; 1.3 全部完成。
+ * 1.1 视频已完成、只剩章节测验; 1.2、2.1 视频不是任务点(目录上 0 个);
+ * 2.2 视频没看完; 2.3 全部完成。
  * 播放器桩上, 已结束视频的控制栏按钮是"重播", 点它会从头再放(记进 replays)。
  * ------------------------------------------------------------------ */
 async function runMooc2(t, overrides, query = '') {
@@ -225,11 +226,15 @@ test('mooc2: 开启自动跳节后, 跳过已完成的视频、真实点击播�
     const { probe, runner } = out;
     assert.deepEqual(probe.rejected, [], `出现不可信事件: ${probe.rejected}`);
     assert.equal(probe.replays, 0, `不应重放已完成的视频: ${probe.log.join(' | ')}`);
-    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A', 'open:B', 'open:C']);
-    assert.ok(probe.log.includes('play:big:B'), `1.2 应当真实点大播放按钮起播: ${probe.log.join(' | ')}`);
-    assert.ok(probe.log.includes('ended:B'), '1.2 应当播完');
+    /* 1.2、2.1 没有任务点, 2.3 已完成: 都不进去, 直接从 1.1 跳到 2.2 */
+    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A', 'open:B']);
+    assert.ok(probe.log.includes('play:big:B'), `2.2 应当真实点大播放按钮起播: ${probe.log.join(' | ')}`);
+    assert.ok(probe.log.includes('ended:B'), '2.2 应当播完');
+    /* 实测外放过一次: 静音必须在第一次起播点击之前 */
+    const mutedAt = probe.log.indexOf('muted:B');
+    assert.ok(mutedAt >= 0 && mutedAt < probe.log.indexOf('play:big:B'), `应当先静音再起播: ${probe.log.join(' | ')}`);
     assert.equal(probe.scriptedPlays, 0, '不应退回 video.play()');
-    assert.equal(runner.sectionsDone, 1, '只有 1.2 是真正放了视频的');
+    assert.equal(runner.sectionsDone, 1, '只有 2.2 是真正放了视频的');
 });
 
 test('mooc2: 目录侧栏收起时先真实点开, 再点目标小节', async (t) => {
@@ -239,19 +244,40 @@ test('mooc2: 目录侧栏收起时先真实点开, 再点目标小节', async (t
     const { probe } = out;
     assert.deepEqual(probe.rejected, [], `出现不可信事件: ${probe.rejected}`);
     assert.ok(probe.log.includes('catalog-open'), `应当先点开目录: ${probe.log.join(' | ')}`);
-    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A', 'open:B', 'open:C']);
+    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A', 'open:B']);
     assert.ok(probe.log.includes('play:big:B'));
     assert.equal(probe.replays, 0);
 });
 
 test('mooc2: 卡片还是上一节的内容时不读, 等它换成当前小节再判断', async (t) => {
-    /* 激活项先变、卡片 2.5 秒后才换。没有归属检查时, 1.2 会读到 1.1 的
-     * "视频已完成"被直接跳过, 1.2 的视频永远不会被播 */
+    /* 激活项先变、卡片 2.5 秒后才换。没有归属检查时, 2.2 会读到 1.1 的
+     * "视频已完成"被直接跳过, 2.2 的视频永远不会被播 */
     const out = await runMooc2(t, { autoAdvanceNoVideo: true, jobsWaitMs: 6000 }, '&slowcards=1');
     if (!out) return;
     const { probe } = out;
     assert.deepEqual(probe.rejected, []);
-    assert.ok(probe.log.includes('play:big:B'), `1.2 的视频应当被播放, 而不是被当成已完成: ${probe.log.join(' | ')}`);
+    assert.ok(probe.log.includes('play:big:B'), `2.2 的视频应当被播放, 而不是被当成已完成: ${probe.log.join(' | ')}`);
     assert.ok(probe.log.includes('ended:B'));
     assert.equal(probe.replays, 0);
+});
+
+test('mooc2: 视频不是任务点时不播, 跳到下一个有待完成任务点的小节', async (t) => {
+    /* 实测《微积分B》: 大部分小节的视频没有 .ans-job-icon, 目录上是 0 个任务点 */
+    const out = await runMooc2(t, {}, '&start=D');
+    if (!out) return;
+    const { probe, runner } = out;
+    assert.deepEqual(probe.rejected, []);
+    assert.equal(probe.log.some((e) => e.startsWith('play:') && e.endsWith(':D')), false, `不是任务点的视频不应被播放: ${probe.log.join(' | ')}`);
+    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:D', 'open:B'], '应当越过 2.1 直接到 2.2');
+    assert.ok(probe.log.includes('play:big:B'));
+    assert.ok(probe.log.includes('ended:B'));
+    assert.equal(runner.sectionsDone, 1);
+});
+
+test('mooc2: --no-mute 时不动静音状态', async (t) => {
+    const out = await runMooc2(t, { mute: false }, '&start=D');
+    if (!out) return;
+    const { probe } = out;
+    assert.ok(probe.log.includes('play:big:B'));
+    assert.equal(probe.log.some((e) => e.startsWith('muted:')), false, `不应静音: ${probe.log.join(' | ')}`);
 });
