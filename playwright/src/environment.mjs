@@ -8,6 +8,8 @@
  *
  * 这里改为从浏览器层面让这些事件根本不发生：
  *   - Emulation.setFocusEmulationEnabled：渲染进程始终认为自己持有焦点，
+ *     （Playwright 接管每个页面时自己就会发这一条，连接模式也一样；这里再显式
+ *     发一次，不依赖它的默认行为。另外两条 Playwright 不发。）
  *     document.hasFocus() 恒为 true，窗口失焦时不再触发 blur / focusout。
  *   - Page.setWebLifecycleState('active')：阻止标签页被冻结（frozen），
  *     否则后台标签的定时器会被大幅节流甚至停掉。

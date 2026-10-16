@@ -10,10 +10,11 @@ import { createPointer } from './src/pointer.mjs';
 import { CourseRunner } from './src/course.mjs';
 import { collectFingerprint, probeTrustedInput, formatReport } from './src/diagnose.mjs';
 import { hardenFocus, noteOnVisibility } from './src/environment.mjs';
+import { inspectPage } from './src/inspect.mjs';
 import { isAllowedUrl } from './src/selectors.mjs';
 
 async function main() {
-    const { config, check, help } = parseArgs(process.argv.slice(2));
+    const { config, check, inspect, help } = parseArgs(process.argv.slice(2));
     if (help) {
         console.log(helpText);
         return 0;
@@ -38,6 +39,22 @@ async function main() {
 
         /* 焦点模拟要在跑流程之前装好，这样整段播放期间都不会有 blur */
         const focus = await hardenFocus(page, log);
+
+        if (inspect) {
+            const report = await inspectPage(page, {
+                /* 把指针移进播放器, 再补一次 1px 移动迫使浏览器重新命中测试 */
+                hoverPlayer: async (frame, selector) => {
+                    const box = await frame.locator(selector).first.boundingBox();
+                    if (!box) return;
+                    await pointer.moveTo({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+                    await page.mouse.move(Math.round(pointer.state.x) + 1, Math.round(pointer.state.y));
+                    pointer.state.x += 1;
+                    await new Promise((done) => setTimeout(done, 800));
+                },
+            });
+            console.log(report);
+            return 0;
+        }
 
         if (check) {
             const fingerprint = await collectFingerprint(page);

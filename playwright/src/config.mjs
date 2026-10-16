@@ -55,12 +55,14 @@ const camel = (name) => name.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
 export function parseArgs(argv) {
     const options = {};
     let check = false;
+    let inspect = false;
     let help = false;
 
     for (let i = 0; i < argv.length; i += 1) {
         const token = argv[i];
         if (token === '--help' || token === '-h') { help = true; continue; }
         if (token === '--check') { check = true; continue; }
+        if (token === '--inspect') { inspect = true; continue; }
         if (token === '--launch') { options.mode = 'launch'; continue; }
         if (token === '--connect') { options.mode = 'connect'; continue; }
         if (!token.startsWith('--')) throw new Error(`无法识别的参数: ${token}`);
@@ -102,7 +104,7 @@ export function parseArgs(argv) {
         throw new Error('--mode 只能是 connect 或 launch');
     }
 
-    return { config: { ...defaults, ...options }, check, help };
+    return { config: { ...defaults, ...options }, check, inspect, help };
 }
 
 export const helpText = `
@@ -120,6 +122,8 @@ export const helpText = `
 
 行为
   --check                 只做特征自检并退出，不动课程进度
+  --inspect               只读检查课程页结构(目录、学习步骤、播放器、弹出物)，
+                          适配页面改版时先跑它；不点击、不播放
   --playback-rate <倍速>  默认 1（不写 playbackRate）
   --playback-rate-jitter <幅度>
   --max-sections <n>      最多播放多少节，默认不限

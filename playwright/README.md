@@ -7,7 +7,7 @@
 | 点击从哪来 | 页面里 `dispatchEvent(new MouseEvent(...))` | CDP `Input.dispatchMouseEvent`，浏览器自己构造 |
 | `event.isTrusted` | `false`，**无法伪造**（WebIDL `[LegacyUnforgeable]`，实例属性且不可配置） | `true` |
 | 页面写 `if (!e.isTrusted) return` | 一定过不去 | 正常放行 |
-| 失焦 / `blur` | 只能事后把视频按回播放，事件照样发生过 | `Emulation.setFocusEmulationEnabled`，blur 根本不触发 |
+| 失焦 / `blur` | 只能事后把视频按回播放，事件照样发生过 | Playwright 默认就开了焦点模拟，blur 根本不触发 |
 | 跨域 iframe 里的视频 | 读不到（同源策略），只能跳过 | 直接读 |
 | 代价 | 粘贴即用 | 要装 Node 和一个 npm 包，Chrome 得用特定方式启动 |
 
@@ -57,13 +57,15 @@ node run.mjs --help     # 全部参数
 
 这是相对油猴版的另一个实质差别。油猴版只能在页面里对抗焦点变化：监听 `blur` / `visibilitychange`，等视频被页面脚本暂停之后再按回去——事件照样发生过，页面照样看得见。
 
-这一版从浏览器层面让这些事件根本不发生，启动时自动应用：
+这一版从浏览器层面让这些事件根本不发生：
 
-| CDP 命令 | 作用 |
-| --- | --- |
-| `Emulation.setFocusEmulationEnabled` | 渲染进程始终认为自己持有焦点，`document.hasFocus()` 恒为 `true`，窗口失焦不再触发 `blur` / `focusout` |
-| `Page.setWebLifecycleState('active')` | 阻止标签页被冻结，否则后台标签的定时器会被大幅节流 |
-| `Emulation.setIdleOverride` | Idle Detection API 恒为"用户活跃、屏幕未锁" |
+| CDP 命令 | 作用 | 谁发的 |
+| --- | --- | --- |
+| `Emulation.setFocusEmulationEnabled` | 渲染进程始终认为自己持有焦点，`document.hasFocus()` 恒为 `true`，窗口失焦不再触发 `blur` / `focusout` | **Playwright 自己**：它接管每个页面时都会发（连接模式也一样，只有显式传 `noDefaults` 才不发）。我们再显式发一次，不依赖这个默认行为 |
+| `Page.setWebLifecycleState('active')` | 阻止标签页被冻结，否则后台标签的定时器会被大幅节流 | 我们 |
+| `Emulation.setIdleOverride` | Idle Detection API 恒为"用户活跃、屏幕未锁" | 我们 |
+
+所以端到端测试里"切到别的标签后 `hasFocus()` 仍为 `true`、零次 blur"这一条，验证的是结果，不是我们这几行代码的功劳——不加 `hardenFocus` 它也会通过。
 
 `--check` 会列出这三项实际是否生效（旧版 Chrome 可能缺某个命令，缺了不影响其余部分）。
 
