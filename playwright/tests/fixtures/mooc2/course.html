@@ -28,11 +28,11 @@
 <div id="coursetree"><ul>
   <li>
     <div class="posCatalog_select firstLayer"><span class="posCatalog_name" title="第一章">第一章</span></div>
-    <div class="posCatalog_select posCatalog_active" data-section="A"><span class="posCatalog_name" title="1.1 视频已完成, 只剩测验">1.1 视频已完成, 只剩测验</span>
+    <div class="posCatalog_select posCatalog_active" id="cur101" data-section="A" data-kid="101"><span class="posCatalog_name" title="1.1 视频已完成, 只剩测验">1.1 视频已完成, 只剩测验</span>
       <span class="jobUnfinishCount"><span class="catalog_points_yi prevTips">1个待完成任务点</span></span></div>
-    <div class="posCatalog_select" data-section="B"><span class="posCatalog_name" title="1.2 视频没看完">1.2 视频没看完</span>
+    <div class="posCatalog_select" id="cur102" data-section="B" data-kid="102"><span class="posCatalog_name" title="1.2 视频没看完">1.2 视频没看完</span>
       <span class="jobUnfinishCount"><span class="catalog_points_yi prevTips">1个待完成任务点</span></span></div>
-    <div class="posCatalog_select" data-section="C"><span class="posCatalog_name" title="1.3 全部完成">1.3 全部完成</span>
+    <div class="posCatalog_select" id="cur103" data-section="C" data-kid="103"><span class="posCatalog_name" title="1.3 全部完成">1.3 全部完成</span>
       <span class="icon_Completed prevTips">已完成</span></div>
   </li>
 </ul></div>
@@ -49,12 +49,17 @@ const trusted = (fn) => (e) => {
   if (!e.isTrusted) { probe.rejected.push(e.type + ':' + (e.target.className || e.target.tagName)); return; }
   fn(e);
 };
+/* ?slowcards=1: 激活项立刻变, 卡片过 2.5 秒才换成新小节的——这段时间里
+ * 页面上的卡片还是上一节的, 读了就会拿错任务点状态 */
+const SLOW_CARDS_MS = new URLSearchParams(location.search).get('slowcards') === '1' ? 2500 : 0;
 function open(section) {
   document.querySelectorAll('.posCatalog_select').forEach((el) => el.classList.toggle('posCatalog_active', el.dataset.section === section));
-  const title = document.querySelector(`[data-section="${section}"] .posCatalog_name`).getAttribute('title');
+  const item = document.querySelector(`[data-section="${section}"]`);
+  const title = item.querySelector('.posCatalog_name').getAttribute('title');
   const prev = document.querySelector('.prev_title');
   prev.title = title; prev.textContent = title;
-  document.getElementById('iframe').src = '/knowledge/cards?section=' + section;
+  const load = () => { document.getElementById('iframe').src = '/knowledge/cards?knowledgeid=' + item.dataset.kid + '&section=' + section; };
+  if (SLOW_CARDS_MS && probe.log.length) setTimeout(load, SLOW_CARDS_MS); else load();
   probe.log.push('open:' + section);
 }
 if (new URLSearchParams(location.search).get('collapsed') === '1') document.body.classList.add('collapsed');

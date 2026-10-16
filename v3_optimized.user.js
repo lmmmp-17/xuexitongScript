@@ -965,6 +965,9 @@
                     /* .prev_title 在旧布局里是步骤名("视频"/"章节测验"), 但实测 mooc2
                      * 布局里它是小节标题, 靠它判断会全部落空。先看卡片里的任务点。 */
                     const jobs = this._readJobs();
+                    if (jobs === undefined) {
+                        throw new Error('卡片还没加载到当前小节');
+                    }
                     const pendingVideo = jobs ? jobs.some((job) => job.kind === 'video' && !job.finished) : false;
                     if (jobs && jobs.length && !pendingVideo) {
                         this._handleNoPendingVideo(jobs);
@@ -1243,11 +1246,30 @@
              * 目录上的"1个待完成任务点"可能是章节测验而不是视频, 只有看这里才知道
              * 视频要不要放。找不到卡片文档(旧布局)时返回 null。 */
             _readJobs() {
+                /* 切节之后卡片文档可能还是上一节的。目录激活项的 id 是 cur{知识点id},
+                 * 卡片文档的地址带 knowledgeid={知识点id}(实测), 对不上就返回 undefined
+                 * 表示"还没加载过来", 由调用方稍后重试——读了旧内容会拿上一节的
+                 * "视频已完成"把这一节没看的视频跳过去。 */
+                const active = document.querySelector('.posCatalog_active');
+                const activeId = active && active.id ? active.id.replace(/^cur/, '') : '';
+                let stale = false;
                 for (const frame of dom.select('iframe').toArray()) {
                     const doc = this._frameDocument(frame);
                     if (!doc || typeof doc.querySelectorAll !== 'function') continue;
                     const containers = Array.from(doc.querySelectorAll('.ans-attach-ct'));
                     if (!containers.length) continue;
+                    if (activeId) {
+                        let knowledgeId = null;
+                        try {
+                            knowledgeId = new URL(doc.location.href).searchParams.get('knowledgeid');
+                        } catch (e) {
+                            knowledgeId = null;
+                        }
+                        if (knowledgeId && knowledgeId !== activeId) {
+                            stale = true;
+                            continue;
+                        }
+                    }
                     return containers
                         .filter((ct) => ct.querySelector('.ans-job-icon'))
                         .map((ct) => {
@@ -1257,7 +1279,7 @@
                             return { kind, finished: ct.classList.contains('ans-job-finished') };
                         });
                 }
-                return null;
+                return stale ? undefined : null;
             },
             /* 这个 video 所在的任务点是否已完成(看外层 .ans-attach-ct) */
             _videoJobFinished(video) {

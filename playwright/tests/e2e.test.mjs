@@ -243,3 +243,15 @@ test('mooc2: 目录侧栏收起时先真实点开, 再点目标小节', async (t
     assert.ok(probe.log.includes('play:big:B'));
     assert.equal(probe.replays, 0);
 });
+
+test('mooc2: 卡片还是上一节的内容时不读, 等它换成当前小节再判断', async (t) => {
+    /* 激活项先变、卡片 2.5 秒后才换。没有归属检查时, 1.2 会读到 1.1 的
+     * "视频已完成"被直接跳过, 1.2 的视频永远不会被播 */
+    const out = await runMooc2(t, { autoAdvanceNoVideo: true, jobsWaitMs: 6000 }, '&slowcards=1');
+    if (!out) return;
+    const { probe } = out;
+    assert.deepEqual(probe.rejected, []);
+    assert.ok(probe.log.includes('play:big:B'), `1.2 的视频应当被播放, 而不是被当成已完成: ${probe.log.join(' | ')}`);
+    assert.ok(probe.log.includes('ended:B'));
+    assert.equal(probe.replays, 0);
+});

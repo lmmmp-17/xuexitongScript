@@ -115,7 +115,17 @@ export class CourseRunner {
     async readJobs(timeoutMs = this.config.jobsWaitMs ?? 6000) {
         const deadline = Date.now() + timeoutMs;
         for (;;) {
-            const cards = this.page.frames().find((f) => !f.isDetached() && f.url().includes('/knowledge/cards'));
+            /* 切节之后卡片 frame 可能还是上一节的。目录激活项的 id 是 cur{知识点id},
+             * 卡片 frame 的 URL 带 knowledgeid={知识点id}(实测), 对不上就是旧内容——
+             * 读了会拿上一节的"视频已完成"把这一节没看的视频跳过去。 */
+            const activeId = await this.page.evaluate(
+                () => ((document.querySelector('.posCatalog_active') || {}).id || '').replace(/^cur/, ''),
+            ).catch(() => '');
+            const cards = this.page.frames().find((f) => {
+                if (f.isDetached() || !f.url().includes('/knowledge/cards')) return false;
+                if (!activeId) return true;
+                return new URL(f.url()).searchParams.get('knowledgeid') === activeId;
+            });
             if (cards) {
                 const jobs = await cards.evaluate(() => Array.from(document.querySelectorAll('.ans-attach-ct')).map((ct) => {
                     const src = (ct.querySelector('iframe') || {}).getAttribute
