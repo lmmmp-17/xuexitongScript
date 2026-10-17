@@ -17,19 +17,62 @@
  * 两种模式都不跑 headless：无头浏览器的特征面比自动化标志本身还大。
  * ------------------------------------------------------------------ */
 import { resolve } from 'node:path';
-import { isAllowedUrl } from './selectors.mjs';
-import { chromeLaunchHint } from './platform.mjs';
+import { spawn } from 'node:child_process';
+import { isAllowedUrl, HOME_URL, COURSE_PAGE } from './selectors.mjs';
+import { chromeLaunchHint, findChrome, sideProfileDir, dedicatedChromeArgs } from './platform.mjs';
+import { sleep } from './human.mjs';
 
 async function loadPlaywright() {
     try {
         return await import('playwright-core');
     } catch (e) {
         const error = new Error(
-            '未找到 playwright-core。在 playwright/ 目录下执行 npm install 即可（它不会下载浏览器，直接用你本机的 Chrome）。'
+            '未找到 playwright-core。重新运行 start 脚本（或 node run.mjs --setup）会自动安装。'
         );
         error.cause = e;
         throw error;
     }
+}
+
+async function endpointReady(endpoint) {
+    try {
+        const res = await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(1500) });
+        return res.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+/* 连不上调试端口时，自己把专用 Chrome 开起来。
+ *
+ * 这和用户照 README 手动敲命令启动是同一件事：同一个独立 profile、同一组参数，
+ * 只是由脚本代劳。Chrome 是作为普通进程启动的，不经过 Playwright 的 launch，
+ * 所以不会带上 --enable-automation 之类的参数。脚本退出时不关它（登录状态在里面）。 */
+export async function launchDedicatedChrome(config, log, { spawnProcess = spawn, extraArgs = [], url = HOME_URL } = {}) {
+    const exe = findChrome({ configured: config.chromePath });
+    if (!exe) {
+        throw new Error(
+            '没找到本机的 Google Chrome。装好 Chrome 后重新运行；装在别的位置的话，用 --chrome-path <chrome 可执行文件> 指定。'
+        );
+    }
+    const profileDir = config.chromeProfile ? resolve(config.chromeProfile) : sideProfileDir();
+    const args = [...dedicatedChromeArgs({ port: config.cdpPort, profileDir, mute: config.mute, url }), ...extraArgs];
+    log.say(`启动专用 Chrome（独立 profile：${profileDir}${config.mute ? '，静音' : ''}）`);
+    const child = spawnProcess(exe, args, { detached: true, stdio: 'ignore' });
+    child.on('error', () => {});
+    child.unref();
+
+    const endpoint = `http://127.0.0.1:${config.cdpPort}`;
+    const deadline = Date.now() + (config.chromeStartTimeoutMs ?? 30000);
+    while (Date.now() < deadline) {
+        if (await endpointReady(endpoint)) return { pid: child.pid };
+        await sleep(400);
+    }
+    throw new Error(
+        `Chrome 启动了，但调试端口 ${config.cdpPort} 一直没打开。\n` +
+        '最常见的原因：这个专用 Chrome 之前已经被手动打开过、而且没带调试端口。把所有 Chrome 窗口都关掉再运行一次。\n' +
+        '端口被别的程序占用的话，用 --cdp-port 换一个，比如 --cdp-port 9333。'
+    );
 }
 
 /* 启动参数单独拎出来，便于断言——这几项都不是随手写的：
@@ -79,19 +122,26 @@ export async function openBrowser(config, log) {
     }
 
     const endpoint = `http://127.0.0.1:${config.cdpPort}`;
-    log.say(`连接已在运行的 Chrome: ${endpoint}`);
+    let launched = null;
+    if (!await endpointReady(endpoint)) {
+        if (!config.autoLaunch) {
+            throw new Error(
+                `连不上 ${endpoint}。请先这样启动一个可被接管的 Chrome：\n\n` +
+                `  ${chromeLaunchHint(config.cdpPort)}\n\n` +
+                '注意：如果 Chrome 已经在运行，直接加 --remote-debugging-port 是不会生效的——\n' +
+                '参数会被转交给已有实例，端口上什么都没有。上面的命令用了一个独立的 profile\n' +
+                '目录来绕开这一点，第一次需要在里面登录一次学习通。\n' +
+                '然后在那个窗口里打开课程播放页，再重新运行本脚本。'
+            );
+        }
+        launched = await launchDedicatedChrome(config, log);
+    }
+    log.say(`连接 Chrome: ${endpoint}`);
     let browser;
     try {
         browser = await chromium.connectOverCDP(endpoint);
     } catch (e) {
-        throw new Error(
-            `连不上 ${endpoint}。请先这样启动一个可被接管的 Chrome：\n\n` +
-            `  ${chromeLaunchHint(config.cdpPort)}\n\n` +
-            '注意：如果 Chrome 已经在运行，直接加 --remote-debugging-port 是不会生效的——\n' +
-            '参数会被转交给已有实例，端口上什么都没有。上面的命令用了一个独立的 profile\n' +
-            '目录来绕开这一点，第一次需要在里面登录一次学习通。\n' +
-            '然后在那个窗口里打开课程播放页，再重新运行本脚本。'
-        );
+        throw new Error(`连不上 ${endpoint}：${e.message.split('\n')[0]}`);
     }
     const context = browser.contexts()[0];
     if (!context) throw new Error('这个 Chrome 实例里没有可用的浏览上下文');
@@ -100,6 +150,7 @@ export async function openBrowser(config, log) {
         context,
         browser,
         owned: false,
+        launchedChrome: Boolean(launched),
         /* 不是我们启动的浏览器就只断开连接，不去关别人的窗口 */
         async close() {
             await browser.close();
@@ -107,31 +158,40 @@ export async function openBrowser(config, log) {
     };
 }
 
-/* 优先接管已经打开的课程页；没有就按 --url 开一个 */
-export async function pickCoursePage(context, config, log) {
-    const pages = context.pages();
-    const opened = pages.find((page) => /\/mycourse\/studentstudy/.test(page.url()));
+/* 优先接管已经打开的课程页。没有的话：给了 --url 就打开它，否则等用户在浏览器里
+ * 登录、点开课程——以前这里直接报错退出，用户得开好页面再重新运行一遍。 */
+export async function pickCoursePage(context, config, log, abort = { stopped: false }) {
+    const find = () => context.pages().find((page) => isAllowedUrl(page.url()) && COURSE_PAGE.test(page.url()));
+    const opened = find();
     if (opened) {
         log.say(`接管已打开的课程页: ${opened.url()}`);
         await opened.bringToFront();
         return opened;
     }
 
-    if (!config.url) {
-        const hint = pages.map((page) => page.url()).filter(Boolean).slice(0, 5);
-        throw new Error(
-            '没有找到打开着的课程播放页。要么先在浏览器里打开它，要么用 --url <课程页地址> 指定。' +
-            (hint.length ? `\n当前标签页：\n  ${hint.join('\n  ')}` : '')
-        );
+    if (config.url) {
+        if (!isAllowedUrl(config.url)) {
+            throw new Error(`--url 必须是 chaoxing.com 下的地址，拿到的是: ${config.url}`);
+        }
+        const pages = context.pages();
+        const page = pages.find((item) => item.url() === 'about:blank') || await context.newPage();
+        log.say(`打开课程页: ${config.url}`);
+        await page.bringToFront();
+        await page.goto(config.url, { waitUntil: 'domcontentloaded' });
+        return page;
     }
 
-    if (!isAllowedUrl(config.url)) {
-        throw new Error(`--url 必须是 chaoxing.com 下的地址，拿到的是: ${config.url}`);
+    log.say('请在 Chrome 里登录学习通，进入要刷的课程，点开任意一节（播放页）。打开之后会自动开始，按 Ctrl+C 退出。');
+    const deadline = config.waitCourseMs > 0 ? Date.now() + config.waitCourseMs : Infinity;
+    while (!abort.stopped && Date.now() < deadline) {
+        await sleep(1500);
+        const page = find();
+        if (page) {
+            log.say(`找到课程页: ${page.url()}`);
+            /* 页面刚开始加载，让它先稳一会儿再动手 */
+            await page.waitForLoadState('domcontentloaded').catch(() => {});
+            return page;
+        }
     }
-
-    const page = pages.find((item) => item.url() === 'about:blank') || await context.newPage();
-    log.say(`打开课程页: ${config.url}`);
-    await page.bringToFront();
-    await page.goto(config.url, { waitUntil: 'domcontentloaded' });
-    return page;
+    throw new Error(abort.stopped ? '已退出' : '等了很久没有看到课程播放页，已退出。');
 }

@@ -15,28 +15,74 @@
 
 ## 快速开始（Playwright 版）
 
-### 0. 准备
+### 1. 准备（只做一次）
 
-- **Node.js 20 或更新**：终端里 `node -v` 能看到版本号即可。没有的话去 [nodejs.org](https://nodejs.org/) 装 LTS 版。
-- **Google Chrome**：用你电脑上装的那个，不需要另外下载浏览器。
-- 下载这个仓库：
+- **Google Chrome**：用你电脑上装的那个。
+- **Node.js 20 或更新**：
+  - Windows：没装也没关系，第一次运行 `start.cmd` 时会问你要不要用 winget 自动装。
+  - macOS：`brew install node`；Linux：用系统的包管理器装 `nodejs`。也可以到 [nodejs.org](https://nodejs.org/) 下载 LTS 版。
+- **下载这个仓库**：在 GitHub 页面点 **Code → Download ZIP** 解压；或者 `git clone https://github.com/lmmmp-17/xuexitongScript.git`。
 
-  ```bash
-  git clone https://github.com/lmmmp-17/xuexitongScript.git
-  ```
+### 2. 运行
 
-### 1. 安装依赖
+| 系统 | 怎么启动 |
+| --- | --- |
+| Windows | 双击仓库里的 **`start.cmd`** |
+| Linux / macOS | 在仓库目录下执行 **`./start.sh`** |
 
-```bash
-cd xuexitongScript/playwright
-npm install
-```
+接下来：
 
-只会装 `playwright-core`（约 5MB），不下载浏览器。
+1. 第一次运行会自动安装依赖（只装一个约 5MB 的 npm 包，不下载浏览器），之后就不再装了。
+2. 脚本会自动打开一个**专用的 Chrome**：单独的用户目录，和你平时用的 Chrome 分开，全程静音。
+3. 在这个 Chrome 里**登录学习通**。只有第一次需要登录，以后会记住。
+4. 进入要刷的课程，**点开任意一节**进到播放页。脚本看到播放页就会自动开始。
 
-### 2. 启动一个专用的 Chrome
+从哪一节开始，脚本就从哪一节往后走。要停的时候按 `Ctrl+C`，或者直接关掉命令行窗口；浏览器不会被关掉。
 
-脚本要通过调试端口 9222 接管 Chrome，所以 Chrome 得用下面的命令启动。按你的系统选一条：
+脚本会做这些事：
+
+- 读左侧目录，跳到下一个**还有待完成任务点**的小节。已完成的、没有任务点的小节直接越过，不算任务点的视频不播。
+- 先静音，再真实点击播放按钮；暂停了会恢复；放完停几秒再切下一节，偶尔会停得久一点。
+- 遇到章节测验之类的非视频任务点，默认**停下来**等你处理，不会跳过。确认可以跳过的话，加 `--auto-advance-no-video`。
+
+### 3. 想改行为时加参数
+
+参数加在启动命令后面，比如 `./start.sh --max-sections 1`。Windows 上要加参数的话，在命令行里进入仓库目录执行 `start.cmd --max-sections 1`。
+
+| 参数 | 作用 |
+| --- | --- |
+| `--max-sections <n>` | 播完 n 节就停（第一次可以用 `--max-sections 1` 试试） |
+| `--auto-advance-no-video` | 没有待播视频的小节直接跳到下一节（默认停下） |
+| `--playback-rate <倍速>` | 默认 1，也就是不改倍速 |
+| `--no-mute` | 不静音 |
+| `--log-level verbose` | 显示全部细节，排查问题时用 |
+| `--inspect` | 只读查看当前页面的结构，不点击、不播放 |
+| `--check` | 特征自检，不动课程进度 |
+| `--setup` | 重新安装依赖 |
+| `--help` | 列出全部参数 |
+
+### 运行期间注意
+
+- 浏览器窗口可以放到别的窗口**后面**，或者挪到另一个桌面，不影响播放。但**不要最小化**，也不要在同一个窗口里切到别的标签页，否则页面会变成后台状态。
+- 脚本运行时，别在那个 Chrome 窗口里动鼠标。想用电脑就把它放到后面。
+- 刷完把这个专用 Chrome 关掉。它开着调试端口，开着的时候本机的任何程序都能控制它。
+
+### 遇到问题
+
+| 现象 | 处理 |
+| --- | --- |
+| 双击 `start.cmd` 后 Windows 提示"已保护你的电脑" | 点"更多信息"→"仍要运行"。从网上下载的 ZIP 解压出来的脚本可能会这样 |
+| `没找到 Node.js` | 按提示装 Node.js 20 或更新，装完重新运行 |
+| `依赖安装失败` | 检查网络后重新运行。国内网络慢的话，先执行 `npm config set registry https://registry.npmmirror.com` |
+| `没找到本机的 Google Chrome` | 装好 Chrome；装在别的位置的话，加 `--chrome-path <chrome 的完整路径>` |
+| `Chrome 启动了，但调试端口一直没打开` | 这个专用 Chrome 之前被你手动打开过（没带调试端口）。关掉所有 Chrome 窗口再运行 |
+| 停下来说"还剩 N 个非视频任务点" | 章节测验等需要你自己完成；完成后重新运行，或者加 `--auto-advance-no-video` |
+| `点了目录…但页面没有切过去` | 平台可能弹了提示框，看一眼浏览器，处理掉再重新运行 |
+| 页面改版、脚本找不到东西 | 先跑 `--inspect` 看真实结构，再带着输出提 issue |
+
+### 进阶：自己启动 Chrome
+
+不想让脚本代劳的话，也可以自己用调试端口启动 Chrome，脚本连得上就不会再启动一个。命令和脚本用的是同一组参数：
 
 ```bash
 # Linux
@@ -52,66 +98,8 @@ google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chro
 "%ProgramFiles%\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome" --mute-audio
 ```
 
-这三个参数的作用：
-
-- `--remote-debugging-port=9222`：开调试端口，脚本从这里接管。
-- `--user-data-dir=...`：用一个**单独的 profile 目录**，和你平时用的 Chrome 分开。不加的话，如果平时的 Chrome 已经开着，这条命令只会在原来的窗口里多开一个标签，**调试端口不会打开**。单独的目录第一次需要登录一次学习通，之后登录状态会一直保留。
-- `--mute-audio`：这个 Chrome 整个不出声。脚本本身也会在播放前静音，这一项是双保险。
-
-### 3. 登录并打开课程
-
-在刚打开的 Chrome 窗口里：
-
-1. 登录学习通；
-2. 进入要刷的课程，点开**任意一节**，进到播放页（地址里带 `/mycourse/studentstudy`）。
-
-从哪一节开始，脚本就从哪一节往后走。
-
-### 4. 运行
-
-回到终端，在 `playwright/` 目录下：
-
-```bash
-node run.mjs --max-sections 1     # 第一次建议先只跑一节，看看是否正常
-node run.mjs                      # 一直跑到课程结束
-```
-
-按 `Ctrl+C` 停止。只会停脚本，不会关掉浏览器。
-
-脚本会做这些事：
-
-- 读左侧目录，跳到下一个**还有待完成任务点**的小节。已完成的、没有任务点的小节直接越过，不算任务点的视频不播。
-- 先静音，再真实点击播放按钮；暂停了会恢复；放完停几秒再切下一节，偶尔会停得久一点。
-- 遇到章节测验之类的非视频任务点，默认**停下来**等你处理，不会跳过。确认可以跳过的话，加 `--auto-advance-no-video`。
-
-### 5. 常用参数
-
-| 参数 | 作用 |
-| --- | --- |
-| `--max-sections <n>` | 播完 n 节就停 |
-| `--auto-advance-no-video` | 没有待播视频的小节直接跳到下一节（默认停下） |
-| `--playback-rate <倍速>` | 默认 1，也就是不改倍速 |
-| `--no-mute` | 不静音 |
-| `--log-level verbose` | 显示全部细节，排查问题时用 |
-| `--inspect` | 只读查看当前页面的结构，不点击、不播放 |
-| `--check` | 特征自检，不动课程进度 |
-| `--help` | 列出全部参数 |
-
-### 运行期间注意
-
-- 浏览器窗口可以放到别的窗口**后面**，或者挪到另一个桌面，不影响播放。但**不要最小化**，也不要在同一个窗口里切到别的标签页，否则页面会变成后台状态。
-- 脚本运行时，别在那个 Chrome 窗口里动鼠标。想用电脑就把它放到后面。
-- 用完把这个 Chrome 关掉。调试端口开着时，本机的任何程序都能控制这个浏览器。
-
-### 遇到问题
-
-| 现象 | 处理 |
-| --- | --- |
-| `连不上 http://127.0.0.1:9222` | 第 2 步的 Chrome 没有用调试端口启动。把那个 Chrome 完全关掉，再用第 2 步的命令重新打开 |
-| `没有找到打开着的课程播放页` | 先在那个 Chrome 里点进课程的某一节播放页，再运行 |
-| 停下来说"还剩 N 个非视频任务点" | 章节测验等需要你自己完成；完成后重新运行，或者加 `--auto-advance-no-video` |
-| `点了目录…但页面没有切过去` | 平台可能弹了提示框，看一眼浏览器，处理掉再重新运行 |
-| 页面改版、脚本找不到东西 | 先跑 `node run.mjs --inspect` 看真实结构，再带着输出提 issue |
+- `--user-data-dir` 一定要是单独的目录。和平时用的 Chrome 共用的话，如果平时的 Chrome 已经开着，这条命令只会在原来的窗口里多开一个标签，**调试端口不会打开**。
+- 加 `--no-auto-launch` 可以让脚本连不上时只报错，不自己启动。
 
 更多技术细节（为什么这么做、还能被什么查出来、测试怎么跑）见 [`playwright/README.md`](playwright/README.md)。
 
@@ -122,13 +110,16 @@ node run.mjs                      # 一直跑到课程结束
 ```
 xuexitongScript/
 ├── README.md               ← 你正在看的：快速开始 + 总览
+├── start.cmd               入口（Windows）：双击运行
+├── start.sh                入口（Linux / macOS）：./start.sh
 ├── playwright/             Playwright 版（推荐）
 │   ├── README.md           技术说明：原理、焦点模拟、检测面、测试
-│   ├── run.mjs             入口：node run.mjs
+│   ├── run.mjs             start 脚本最终调用的就是它，也可以直接 node run.mjs
 │   ├── package.json
 │   ├── src/
 │   │   ├── course.mjs      课程流程：读目录、选下一节、起播、监控、切节
-│   │   ├── browser.mjs     连接 / 启动 Chrome
+│   │   ├── browser.mjs     连接 Chrome；连不上时启动专用 Chrome；等你打开课程页
+│   │   ├── setup.mjs       第一次运行时自动安装依赖
 │   │   ├── pointer.mjs     真实指针：贝塞尔轨迹、点击、滚轮
 │   │   ├── environment.mjs 焦点与生命周期模拟（窗口放后台不触发 blur）
 │   │   ├── selectors.mjs   页面选择器，平台改版时只改这里

@@ -4,7 +4,8 @@
  * Chrome 可执行文件的位置，和 profile 目录的写法。
  * ------------------------------------------------------------------ */
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { accessSync, constants } from 'node:fs';
+import { join, delimiter, posix, win32 } from 'node:path';
 
 export const SIDE_PROFILE = 'xuexitong-chrome';
 
@@ -22,6 +23,64 @@ export function chromeCommand() {
 export function sideProfilePath() {
     if (process.platform === 'win32') return `%USERPROFILE%\\${SIDE_PROFILE}`;
     return join(homedir(), SIDE_PROFILE);
+}
+
+/* 专用 profile 的真实路径（自动启动 Chrome 时用；上面那个是给人抄的命令） */
+export function sideProfileDir() {
+    return join(homedir(), SIDE_PROFILE);
+}
+
+/* 本机 Chrome 可能在的位置。Linux 上的是命令名，要去 PATH 里找 */
+export function chromeCandidates(platform = process.platform, env = process.env, home = homedir()) {
+    if (platform === 'win32') {
+        const roots = [env.PROGRAMFILES || env.ProgramFiles, env['PROGRAMFILES(X86)'] || env['ProgramFiles(x86)'], env.LOCALAPPDATA]
+            .filter(Boolean);
+        return roots.map((root) => win32.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    }
+    if (platform === 'darwin') {
+        const app = 'Google Chrome.app/Contents/MacOS/Google Chrome';
+        return [posix.join('/Applications', app), posix.join(home, 'Applications', app)];
+    }
+    return ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
+}
+
+function executable(file) {
+    try {
+        accessSync(file, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+/* 找到第一个存在的 Chrome。configured 是用户用 --chrome-path 指定的，优先用它 */
+export function findChrome({ configured = '', platform = process.platform, env = process.env, exists = executable } = {}) {
+    if (configured) return exists(configured) ? configured : null;
+    for (const candidate of chromeCandidates(platform, env)) {
+        const absolute = platform === 'win32' || candidate.includes('/');
+        if (absolute) {
+            if (exists(candidate)) return candidate;
+            continue;
+        }
+        for (const dir of (env.PATH || '').split(delimiter).filter(Boolean)) {
+            const full = join(dir, candidate);
+            if (exists(full)) return full;
+        }
+    }
+    return null;
+}
+
+/* 自动启动专用 Chrome 时的参数，和下面 chromeLaunchHint 让人手动敲的是同一组，
+ * 只多了两个跳过首次运行引导的开关。没有任何自动化相关的参数。 */
+export function dedicatedChromeArgs({ port, profileDir, mute = true, url = '' }) {
+    return [
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profileDir}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        ...(mute ? ['--mute-audio'] : []),
+        ...(url ? [url] : []),
+    ];
 }
 
 /* 给出当前平台下启动「可被接管的 Chrome」的完整命令。

@@ -25,6 +25,11 @@ export const SEL = {
 
 export const ALLOWED_HOSTS = ['chaoxing.com'];
 
+/* 自动启动专用 Chrome 时打开的页面：没登录会跳到登录页，登录了是课程列表 */
+export const HOME_URL = 'https://i.chaoxing.com/';
+/* 课程播放页（脚本要接管的页面）的地址特征 */
+export const COURSE_PAGE = /\/mycourse\/studentstudy/;
+
 export function isAllowedUrl(url) {
     try {
         const { protocol, hostname } = new URL(url);

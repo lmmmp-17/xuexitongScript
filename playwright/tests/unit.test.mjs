@@ -7,8 +7,10 @@ import { parseArgs, defaults } from '../src/config.mjs';
 import { isAllowedUrl } from '../src/selectors.mjs';
 import { CourseRunner, pickNextSection } from '../src/course.mjs';
 import { createLogger } from '../src/logger.mjs';
-import { chromeLaunchHint, describePlatform } from '../src/platform.mjs';
-import { launchOptions } from '../src/browser.mjs';
+import { chromeLaunchHint, describePlatform, findChrome, chromeCandidates, dedicatedChromeArgs } from '../src/platform.mjs';
+import { launchOptions, launchDedicatedChrome, pickCoursePage } from '../src/browser.mjs';
+import { ensureInstalled } from '../src/setup.mjs';
+import { createServer } from 'node:http';
 
 const silent = createLogger('silent');
 
@@ -367,4 +369,96 @@ test('切节：点了目录却没切过去时重试一次就停下，不原地�
     assert.equal(await runner.gotoNextSection(), false);
     assert.equal(clicks, 2, '应当只点两次: 一次加一次重试');
     assert.equal(runner.stopped, true, '切不过去就该停下');
+});
+
+test('找 Chrome：Windows / macOS 看固定位置，Linux 在 PATH 里找，--chrome-path 优先', () => {
+    const win = chromeCandidates('win32', { PROGRAMFILES: 'C:\\Program Files', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' });
+    assert.equal(win[0], 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+    assert.ok(win.some((p) => p.startsWith('C:\\Users\\u\\AppData\\Local')), '要包括只给当前用户装的位置');
+    const winHit = findChrome({ platform: 'win32', env: { LOCALAPPDATA: 'C:\\L' }, exists: (p) => p.startsWith('C:\\L') });
+    assert.equal(winHit, 'C:\\L\\Google\\Chrome\\Application\\chrome.exe');
+
+    const linux = findChrome({ platform: 'linux', env: { PATH: '/nope:/opt/bin' }, exists: (p) => p === '/opt/bin/chromium' });
+    assert.equal(linux, '/opt/bin/chromium');
+    assert.equal(findChrome({ platform: 'linux', env: { PATH: '/nope' }, exists: () => false }), null);
+
+    assert.equal(findChrome({ configured: '/my/chrome', exists: (p) => p === '/my/chrome' }), '/my/chrome');
+    assert.equal(findChrome({ configured: '/missing', exists: () => false }), null, '指定的路径不存在就别悄悄换成别的');
+    assert.match(chromeCandidates('darwin', {}, '/Users/u')[0], /^\/Applications\/Google Chrome\.app/);
+});
+
+test('自动启动专用 Chrome 的参数：和手动命令同一组，不带任何自动化开关', () => {
+    const args = dedicatedChromeArgs({ port: 9222, profileDir: '/home/u/xuexitong-chrome', url: 'https://i.chaoxing.com/' });
+    assert.ok(args.includes('--remote-debugging-port=9222'));
+    assert.ok(args.includes('--user-data-dir=/home/u/xuexitong-chrome'));
+    assert.ok(args.includes('--mute-audio'), '默认静音');
+    assert.equal(args.at(-1), 'https://i.chaoxing.com/');
+    assert.equal(args.some((a) => /automation|headless|webdriver/i.test(a)), false);
+    assert.equal(dedicatedChromeArgs({ port: 1, profileDir: '/p', mute: false }).includes('--mute-audio'), false);
+});
+
+test('连不上时自动启动专用 Chrome：独立进程、不跟着脚本退出、等到调试端口就绪', async () => {
+    /* 用一个假的 /json/version 充当“Chrome 起来了” */
+    const server = createServer((req, res) => { res.writeHead(200); res.end('{}'); });
+    await new Promise((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address();
+    let call = null;
+    let unref = 0;
+    try {
+        await launchDedicatedChrome(
+            { ...defaults, cdpPort: port, chromePath: process.execPath, chromeProfile: '/tmp/p' },
+            silent,
+            {
+                url: 'http://example.test/',
+                spawnProcess(exe, args, options) {
+                    call = { exe, args, options };
+                    return { pid: 1, on() {}, unref() { unref += 1; } };
+                },
+            },
+        );
+    } finally {
+        server.close();
+    }
+    assert.equal(call.exe, process.execPath);
+    assert.equal(call.options.detached, true, '脚本退出（Ctrl+C）时不能把 Chrome 一起带走');
+    assert.equal(call.options.stdio, 'ignore');
+    assert.equal(unref, 1);
+    assert.ok(call.args.includes(`--remote-debugging-port=${port}`));
+    assert.ok(call.args.includes('--user-data-dir=/tmp/p'));
+    assert.equal(call.args.at(-1), 'http://example.test/');
+});
+
+test('找不到 Chrome 时说清楚怎么办', async () => {
+    await assert.rejects(
+        launchDedicatedChrome({ ...defaults, chromePath: '/definitely/not/chrome' }, silent, { spawnProcess() { throw new Error('不应启动'); } }),
+        /没找到本机的 Google Chrome.*--chrome-path/s,
+    );
+});
+
+test('没有课程页时一直等，用户点开课程后自动接管；Ctrl+C 能退出', async () => {
+    const pages = [{ url: () => 'https://i.chaoxing.com/base' }];
+    const context = { pages: () => pages };
+    const course = {
+        url: () => 'https://mooc1.chaoxing.com/mycourse/studentstudy?chapterId=1',
+        async waitForLoadState() {},
+        async bringToFront() {},
+    };
+    setTimeout(() => pages.push(course), 400);
+    const picked = await pickCoursePage(context, { ...defaults }, silent, { stopped: false });
+    assert.equal(picked, course);
+
+    const abort = { stopped: false };
+    setTimeout(() => { abort.stopped = true; }, 300);
+    await assert.rejects(pickCoursePage({ pages: () => [] }, { ...defaults }, silent, abort), /已退出/);
+});
+
+test('第一次运行自动安装依赖；装过就不再装；--setup 强制重装；失败时给出镜像提示', () => {
+    const calls = [];
+    const ok = (cmd, options) => { calls.push({ cmd, options }); return { status: 0 }; };
+    assert.equal(ensureInstalled(silent, { dir: '/nonexistent-dir', run: ok }), true);
+    assert.match(calls[0].cmd, /^npm install/);
+    assert.equal(calls[0].options.shell, true, 'Windows 上 npm 是 .cmd，要经过 shell 才能启动');
+    assert.equal(ensureInstalled(silent, { run: ok }), false, '本仓库已经装过，不应再装');
+    assert.equal(ensureInstalled(silent, { force: true, run: ok }), true);
+    assert.throws(() => ensureInstalled(silent, { dir: '/nonexistent-dir', run: () => ({ status: 1 }) }), /npmmirror/);
 });

@@ -12,26 +12,41 @@ import { collectFingerprint, probeTrustedInput, formatReport } from './src/diagn
 import { hardenFocus, noteOnVisibility } from './src/environment.mjs';
 import { inspectPage } from './src/inspect.mjs';
 import { isAllowedUrl } from './src/selectors.mjs';
+import { ensureInstalled } from './src/setup.mjs';
 
 async function main() {
-    const { config, check, inspect, help } = parseArgs(process.argv.slice(2));
+    const { config, check, inspect, help, setup } = parseArgs(process.argv.slice(2));
     if (help) {
         console.log(helpText);
         return 0;
     }
 
     const log = createLogger(config.logLevel);
+    /* 第一次运行（或 --setup）先把依赖装上，用户不用单独执行 npm install */
+    ensureInstalled(log, { force: setup });
+
     const session = await openBrowser(config, log);
     let runner = null;
+    /* 等用户打开课程页的时候还没有 runner，Ctrl+C 要能直接退出 */
+    const abort = { stopped: false };
 
     const shutdown = () => {
+        abort.stopped = true;
         if (runner) runner.stop('收到中断信号');
     };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
 
     try {
-        const page = await pickCoursePage(session.context, config, log);
+        /* 等课程页的时候按了 Ctrl+C：正常退出，不当成错误 */
+        const page = await pickCoursePage(session.context, config, log, abort).catch((error) => {
+            if (abort.stopped) return null;
+            throw error;
+        });
+        if (!page) {
+            log.say('已退出');
+            return 0;
+        }
         if (!isAllowedUrl(page.url())) {
             throw new Error(`当前页面不在 chaoxing.com 域名下，已停止：${page.url()}`);
         }
@@ -86,6 +101,9 @@ async function main() {
         process.off('SIGTERM', shutdown);
         /* close() 里已经区分了“自己启动的要关掉”和“连上去的只断开” */
         await session.close();
+        if (session.launchedChrome) {
+            log.say('专用 Chrome 还开着（登录状态保存在里面）。用完请关掉它：调试端口开着时，本机任何程序都能控制它。');
+        }
     }
 }
 

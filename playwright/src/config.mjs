@@ -9,6 +9,10 @@ export const defaults = {
     profileDir: '.chrome-profile',      /* 仅 launch 模式使用 */
     url: '',
     logLevel: 'quiet',                  /* silent | quiet | normal | verbose */
+    autoLaunch: true,                   /* 连不上调试端口时自己启动专用 Chrome */
+    chromePath: '',                     /* Chrome 可执行文件，空 = 自动找 */
+    chromeProfile: '',                  /* 专用 Chrome 的 profile 目录，空 = 用户目录下的 xuexitong-chrome */
+    waitCourseMs: 0,                    /* 等用户打开课程页的上限，0 = 一直等 */
 
     /* 播放 */
     playbackRate: 1,                    /* 默认不改倍速 */
@@ -46,11 +50,11 @@ export const defaults = {
 
 const NUMBERS = new Set([
     'cdpPort', 'playbackRate', 'playbackRateJitter', 'maxSections', 'maxChapterTestTries',
-    'treeTimeoutMs', 'pollIntervalMs', 'guardNoProgressMs', 'resumeCooldownMs', 'longBreakChance',
+    'treeTimeoutMs', 'pollIntervalMs', 'guardNoProgressMs', 'resumeCooldownMs', 'longBreakChance', 'waitCourseMs',
     'maxStepSwitchTries', 'videoWaitMs', 'actionTimeoutMs', 'jobsWaitMs', 'sectionSwitchWaitMs',
 ]);
 const FLAGS = new Set([
-    'allowScriptedPlay', 'resumeWhileHidden', 'autoAdvanceNoVideo', 'idleActivity', 'mute',
+    'allowScriptedPlay', 'resumeWhileHidden', 'autoAdvanceNoVideo', 'idleActivity', 'mute', 'autoLaunch',
 ]);
 
 const camel = (name) => name.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
@@ -60,12 +64,14 @@ export function parseArgs(argv) {
     let check = false;
     let inspect = false;
     let help = false;
+    let setup = false;
 
     for (let i = 0; i < argv.length; i += 1) {
         const token = argv[i];
         if (token === '--help' || token === '-h') { help = true; continue; }
         if (token === '--check') { check = true; continue; }
         if (token === '--inspect') { inspect = true; continue; }
+        if (token === '--setup') { setup = true; continue; }
         if (token === '--launch') { options.mode = 'launch'; continue; }
         if (token === '--connect') { options.mode = 'connect'; continue; }
         if (!token.startsWith('--')) throw new Error(`无法识别的参数: ${token}`);
@@ -107,39 +113,44 @@ export function parseArgs(argv) {
         throw new Error('--mode 只能是 connect 或 launch');
     }
 
-    return { config: { ...defaults, ...options }, check, inspect, help };
+    return { config: { ...defaults, ...options }, check, inspect, help, setup };
 }
 
 export const helpText = `
 用真实输入事件驱动学习通课程播放（Playwright 版）
 
 用法
-  node run.mjs [选项]
+  Windows：双击仓库根目录的 start.cmd；Linux / macOS：./start.sh
+  或者在 playwright/ 目录下：node run.mjs [选项]
 
-浏览器接入
-  --connect               连接已在运行的 Chrome（默认，特征最低）
-  --cdp-port <端口>       CDP 端口，默认 9222
-  --launch                让脚本自己启动本机 Chrome
-  --profile-dir <目录>    launch 模式的 profile 目录，默认 .chrome-profile
-  --url <地址>            没有打开着的课程页时用它打开
+  第一次运行会自动安装依赖。连不上 Chrome 时会自己启动一个专用的 Chrome
+  （独立 profile、静音），在里面登录、点开课程的任意一节，脚本就会开始。
+
+浏览器
+  --cdp-port <端口>       调试端口，默认 9222
+  --chrome-path <路径>    Chrome 可执行文件，默认自动找
+  --chrome-profile <目录> 专用 Chrome 的 profile 目录，默认用户目录下的 xuexitong-chrome
+  --no-auto-launch        连不上时不自动启动 Chrome，只报错
+  --url <地址>            直接打开这个课程页，不等你手动点
+  --wait-course-ms <ms>   等你打开课程页的上限，默认 0 = 一直等
+  --launch                改用 Playwright 启动 Chrome（特征多一些，不推荐）
+  --profile-dir <目录>    --launch 模式的 profile 目录，默认 .chrome-profile
 
 行为
-  --check                 只做特征自检并退出，不动课程进度
-  --inspect               只读检查课程页结构(目录、学习步骤、播放器、弹出物)，
-                          适配页面改版时先跑它；不点击、不播放
-  --no-mute               起播时不静音（默认静音：起播前就把播放器设成静音，不会外放）
+  --max-sections <n>      播完 n 节就停，默认不限
+  --auto-advance-no-video 没有待播视频的小节直接跳到下一节（默认停下）
+  --no-mute               起播时不静音（默认静音，不会外放）
   --playback-rate <倍速>  默认 1（不写 playbackRate）
   --playback-rate-jitter <幅度>
-  --max-sections <n>      最多播放多少节，默认不限
-  --auto-advance-no-video 没有视频的小节直接跳过（默认停下）
   --no-idle-activity      关掉播放期间的指针微动
   --no-resume-while-hidden  页面在后台时不去动播放状态
   --no-allow-scripted-play  禁止退回 video.play()，只用真实点击
   --poll-interval-ms <ms> 进度轮询基准间隔，默认 1200
   --log-level <档>        silent | quiet | normal | verbose
 
-先这样启动 Chrome（复用你平时的 profile，登录态都在）：
-  google-chrome --remote-debugging-port=9222 --restore-last-session
-在里面打开课程播放页，然后：
-  node run.mjs
+其它
+  --setup                 重新安装依赖
+  --check                 只做特征自检并退出，不动课程进度
+  --inspect               只读检查课程页结构，不点击、不播放
+  --help                  显示这段说明
 `.trim();
