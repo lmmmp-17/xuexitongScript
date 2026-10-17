@@ -1,6 +1,8 @@
-# Playwright 版
+# Playwright 版：技术说明
 
-用**真实输入事件**驱动学习通课程播放。和仓库根目录那份油猴脚本（`v3_optimized.js`）解决的是同一件事，区别只在一处，但那一处是根本性的：
+**怎么装、怎么用，见仓库根目录 [README 的快速开始](../README.md#快速开始playwright-版)。** 这里讲的是它为什么这么做、做到了哪一步、还有哪些查得出来。
+
+用**真实输入事件**驱动学习通课程播放。和 [`userscript/`](../userscript/) 里的油猴脚本解决的是同一件事，区别只在一处，但那一处是根本性的：
 
 | | 油猴版 | 这一版 |
 | --- | --- | --- |
@@ -10,50 +12,6 @@
 | 失焦 / `blur` | 只能事后把视频按回播放，事件照样发生过 | Playwright 默认就开了焦点模拟，blur 根本不触发 |
 | 跨域 iframe 里的视频 | 读不到（同源策略），只能跳过 | 直接读 |
 | 代价 | 粘贴即用 | 要装 Node 和一个 npm 包，Chrome 得用特定方式启动 |
-
-## 安装
-
-```bash
-cd playwright
-npm install
-```
-
-只会装 `playwright-core`（约 5MB），**不下载浏览器**——用的是你本机的 Chrome。
-
-## 用法
-
-### 第一步：启动一个可被接管的 Chrome
-
-```bash
-# Linux
-google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --mute-audio &
-
-# macOS
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --mute-audio &
-
-# Windows
-"%ProgramFiles%\Google\Chrome\Application\chrome.exe" ^
-  --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome" --mute-audio
-```
-
-`--mute-audio` 让这个专用实例整个不出声，页面读不到它。脚本默认也会在播放器上静音，这一项是兜底。
-
-记不住就运行 `node run.mjs`，连不上时它会打印当前平台对应的那一条。
-
-**这里有个坑**：如果 Chrome 已经在运行，再执行一次带 `--remote-debugging-port` 的命令**不会**开出调试端口——参数被转交给已有实例，命令直接返回，端口上什么都没有。上面的命令用一个独立的 `--user-data-dir` 绕开这一点，代价是那个目录第一次需要登录一次学习通（之后登录态就一直留在里面）。
-
-不想用独立目录就得先把 Chrome 完全退干净，再带参数启动。
-
-### 第二步：在那个窗口里打开课程播放页
-
-### 第三步
-
-```bash
-node run.mjs            # 开始播放
-node run.mjs --check    # 只做特征自检，不动课程进度
-node run.mjs --help     # 全部参数
-```
 
 ## 焦点问题
 
@@ -167,19 +125,23 @@ npm run test:unit   # 只跑不需要浏览器的部分
 | 文件 | 作用 |
 | --- | --- |
 | `run.mjs` | CLI 入口 |
+| `src/course.mjs` | 课程流程：读目录、选下一节、进视频步骤、起播、监控、切节 |
 | `src/browser.mjs` | 连接 / 启动浏览器，启动参数集中在 `launchOptions()` |
 | `src/pointer.mjs` | 指针轨迹与真实点击 |
-| `src/course.mjs` | 课程流程：读目录、进视频步骤、起播、监控、切节 |
 | `src/environment.mjs` | 焦点与生命周期模拟 |
+| `src/selectors.mjs` | 页面选择器与域名白名单 |
+| `src/config.mjs` | 默认配置与参数解析 |
+| `src/inspect.mjs` | `--inspect` 的只读结构检查 |
 | `src/diagnose.mjs` | `--check` 的特征自检 |
 | `src/human.mjs` | 随机化原语 |
 | `src/platform.mjs` | 平台差异 |
-| `src/selectors.mjs` | 页面选择器与域名白名单 |
-| `src/config.mjs` | 默认配置与参数解析 |
+| `src/logger.mjs` | 分档日志 |
+| `tests/unit.test.mjs` | 不需要浏览器的单元测试 |
+| `tests/e2e.test.mjs` | 用本机 Chrome 跑完整流程，桩页面在 `tests/fixtures/` |
 
 ## 和油猴版怎么选
 
-- 想**粘贴即用**、不装任何东西 → 用根目录的 `v3_optimized.js`
+- 想**粘贴即用**、不装任何东西 → 用 [`userscript/v3_optimized.js`](../userscript/v3_optimized.js)
 - 页面在校验 `isTrusted`、或者你需要把窗口放到后台 → 用这一版
 
 两版都只在 `chaoxing.com` 下运行（`src/selectors.mjs` 的 `isAllowedUrl`），也都不加载任何远程代码。

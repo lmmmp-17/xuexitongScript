@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const root = resolve(import.meta.dirname, '..');
+const root = import.meta.dirname;
 const source = readFileSync(resolve(root, 'v3_optimized.js'), 'utf8').replace(/^﻿/, '');
 const metadata = `// ==UserScript==
 // @name         学习通自动刷课脚本 V3 稳定版
