@@ -183,15 +183,20 @@ export async function pickCoursePage(context, config, log, abort = { stopped: fa
 
     log.say('请在 Chrome 里登录学习通，进入要刷的课程，点开任意一节（播放页）。打开之后会自动开始，按 Ctrl+C 退出。');
     const deadline = config.waitCourseMs > 0 ? Date.now() + config.waitCourseMs : Infinity;
+    const waitingSince = Date.now();
     while (!abort.stopped && Date.now() < deadline) {
         await sleep(1500);
+        /* 转一下让用户知道脚本还活着, 不是卡死了 */
+        log.status(`⏳ 等你打开课程播放页…（已等 ${Math.round((Date.now() - waitingSince) / 1000)} 秒，Ctrl+C 退出）`);
         const page = find();
         if (page) {
+            log.clearStatus();
             log.say(`找到课程页: ${page.url()}`);
             /* 页面刚开始加载，让它先稳一会儿再动手 */
             await page.waitForLoadState('domcontentloaded').catch(() => {});
             return page;
         }
     }
+    log.clearStatus();
     throw new Error(abort.stopped ? '已退出' : '等了很久没有看到课程播放页，已退出。');
 }

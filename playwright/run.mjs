@@ -14,6 +14,9 @@ import { inspectPage } from './src/inspect.mjs';
 import { isAllowedUrl } from './src/selectors.mjs';
 import { ensureInstalled } from './src/setup.mjs';
 
+/* 进程退出前最后打印的一句，见下面 finally 里的说明 */
+let parting = '';
+
 async function main() {
     const { config, check, inspect, help, setup } = parseArgs(process.argv.slice(2));
     if (help) {
@@ -80,19 +83,18 @@ async function main() {
             return probe && probe.isTrusted ? 0 : 1;
         }
 
-        if (focus.applied.length > 0) {
-            log.say('窗口可以放到后面去，失焦不会再打断播放。别在同一个窗口里把课程页切成后台标签。');
-        }
-
         runner = new CourseRunner({ page, pointer, config, log });
         try {
             await runner.run();
+            runner.reportRun(abort.stopped ? '已停止' : '结束');
         } catch (error) {
             /* 切节、等待这些步骤里课程页被关掉时报一句人话, 不甩一串 Playwright 错误 */
             if (page.isClosed()) {
-                log.warn('课程页被关闭了，已停下。重新打开课程页后再运行即可。');
+                runner.reportRun('课程页被关闭了，已停下');
+                log.warn('重新打开课程页后再运行即可。');
                 return 1;
             }
+            runner.reportRun('出错停下');
             throw error;
         }
         return 0;
@@ -101,17 +103,24 @@ async function main() {
         process.off('SIGTERM', shutdown);
         /* close() 里已经区分了“自己启动的要关掉”和“连上去的只断开” */
         await session.close();
+        /* 这句要排在错误信息后面, 所以留到进程退出前再打 */
         if (session.launchedChrome) {
-            log.say('专用 Chrome 还开着（登录状态保存在里面）。用完请关掉它：调试端口开着时，本机任何程序都能控制它。');
+            parting = '提示：脚本启动的那个专用 Chrome 还开着（登录状态保存在里面）。'
+                + '用完请关掉它——调试端口开着的时候，本机任何程序都能控制它。';
         }
     }
 }
 
+const goodbye = (code) => {
+    if (parting) console.log(parting);
+    process.exit(code);
+};
+
 main().then(
-    (code) => process.exit(code ?? 0),
+    (code) => goodbye(code ?? 0),
     (error) => {
         console.error(`\n${error.message}`);
         if (process.env.DEBUG) console.error(error);
-        process.exit(1);
+        goodbye(1);
     }
 );

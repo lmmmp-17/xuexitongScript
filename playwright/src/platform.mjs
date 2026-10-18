@@ -5,7 +5,7 @@
  * ------------------------------------------------------------------ */
 import { homedir } from 'node:os';
 import { accessSync, constants } from 'node:fs';
-import { join, delimiter, posix, win32 } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 
 export const SIDE_PROFILE = 'xuexitong-chrome';
 
@@ -44,6 +44,12 @@ export function chromeCandidates(platform = process.platform, env = process.env,
     return ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
 }
 
+/* 模拟别的平台时(单元测试)要用那个平台的分隔符, 不能用宿主机的:
+ * Windows 上 delimiter 是 ';'、join 用 '\\', 拿来拆 Linux 的 PATH 会拆不开。 */
+function pathUtil(platform) {
+    return platform === 'win32' ? win32 : posix;
+}
+
 function executable(file) {
     try {
         accessSync(file, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
@@ -62,9 +68,9 @@ export function findChrome({ configured = '', platform = process.platform, env =
             if (exists(candidate)) return candidate;
             continue;
         }
-        for (const dir of (env.PATH || '').split(delimiter).filter(Boolean)) {
-            const full = join(dir, candidate);
-            if (exists(full)) return full;
+        const path = pathUtil(platform);
+        for (const dir of (env.PATH || '').split(path.delimiter).filter(Boolean)) {
+            if (exists(path.join(dir, candidate))) return path.join(dir, candidate);
         }
     }
     return null;

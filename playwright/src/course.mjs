@@ -11,6 +11,7 @@
  * ------------------------------------------------------------------ */
 import { SEL } from './selectors.mjs';
 import { human, sleep, sleepFor } from './human.mjs';
+import { bar, clip, formatDuration, formatTime } from './display.mjs';
 
 /* 从当前小节往后找下一节要去的。
  *
@@ -42,6 +43,8 @@ export class CourseRunner {
         this.stepSwitchTries = 0;
         this.sectionsDone = 0;
         this.lostTries = 0;
+        this.startedAt = Date.now();
+        this.currentTitle = '';
     }
 
     stop(reason) {
@@ -335,15 +338,17 @@ export class CourseRunner {
 
             const nearEnd = state.duration > 0 && state.currentTime >= state.duration - 0.4;
             if (state.ended || nearEnd) {
-                this.log.say(`播放完成：${this.formatTime(state.currentTime)} / ${this.formatTime(state.duration)}`);
+                this.log.clearStatus();
+                this.log.say(`✓ 播完「${this.currentTitle || '本节'}」（${formatTime(state.duration)}）`);
                 return 'ended';
             }
 
             if (state.currentTime > lastTime + 0.01) {
                 lastTime = state.currentTime;
                 lastProgressAt = Date.now();
-                this.log.trace(`进度 ${this.formatTime(state.currentTime)} / ${this.formatTime(state.duration)}`);
+                this.log.trace(`进度 ${formatTime(state.currentTime)} / ${formatTime(state.duration)}`);
             }
+            this.showPlaying(state);
 
             const stalledMs = Date.now() - lastProgressAt;
             const needResume = state.paused || stalledMs >= human.ms(this.config.guardNoProgressMs, 0.25);
@@ -418,16 +423,34 @@ export class CourseRunner {
         return true;
     }
 
+    /* 播放中的状态行：正在播什么、播到哪、本次已完成多少 */
+    showPlaying(state) {
+        const ratio = state.duration > 0 ? state.currentTime / state.duration : 0;
+        const done = this.sectionsDone ? ` · 本次已播完 ${this.sectionsDone} 节` : '';
+        this.log.status(
+            `▶ ${clip(this.currentTitle || '视频')}  ${bar(ratio)} ${String(Math.round(ratio * 100)).padStart(3)}%`
+            + `  ${formatTime(state.currentTime)}/${formatTime(state.duration)}${done}`,
+        );
+    }
+
     async sectionPause() {
-        if (human.chance(this.config.longBreakChance)) {
-            const ms = human.ms(this.config.longBreakMs);
-            this.log.say(`本节结束，离开 ${Math.round(ms / 1000)} 秒再继续`);
-            await sleep(ms);
-            return;
+        const long = human.chance(this.config.longBreakChance);
+        const ms = human.ms(long ? this.config.longBreakMs : this.config.sectionPauseMs);
+        if (long) this.log.say(`休息一下，${Math.round(ms / 1000)} 秒后继续`);
+        const until = Date.now() + ms;
+        while (!this.stopped && Date.now() < until) {
+            const left = Math.ceil((until - Date.now()) / 1000);
+            this.log.status(`⏸ 本节结束，${left} 秒后切换下一节 · 本次已播完 ${this.sectionsDone} 节`);
+            await sleep(Math.min(1000, until - Date.now()));
         }
-        const ms = human.ms(this.config.sectionPauseMs);
-        this.log.note(`本节结束，${(ms / 1000).toFixed(1)} 秒后切换`);
-        await sleep(ms);
+        this.log.clearStatus();
+    }
+
+    /* 收尾时说一句人话：这次跑了多久、播完几节 */
+    reportRun(reason) {
+        this.log.clearStatus();
+        const spent = formatDuration(Date.now() - this.startedAt);
+        this.log.say(`—— ${reason}：本次播完 ${this.sectionsDone} 节，用时 ${spent} ——`);
     }
 
     /* 目录侧栏收起时目标项在视口外, 先点开侧栏——看不到目录时人也是这么做的 */
@@ -473,6 +496,7 @@ export class CourseRunner {
         }
 
         const name = target.title || `第${target.chapterIndex + 1}章第${target.sectionIndex + 1}节`;
+        this.currentTitle = name;
         this.log.say(skipped ? `切换到：${name}（跳过中间 ${skipped} 个没有待完成任务点的小节）` : `切换到：${name}`);
         const locator = this.sectionLocator(target);
 
@@ -500,13 +524,6 @@ export class CourseRunner {
         this.chapterTestTries = 0;
         this.stepSwitchTries = 0;
         return true;
-    }
-
-    formatTime(seconds) {
-        const total = Math.max(0, Math.round(Number(seconds) || 0));
-        const m = String(Math.floor(total / 60)).padStart(2, '0');
-        const s = String(total % 60).padStart(2, '0');
-        return `${m}:${s}`;
     }
 
     /* 刚接管页面时先真实地动一下：移动指针、小幅滚一下再滚回来。
@@ -547,7 +564,9 @@ export class CourseRunner {
         await this.settleIn();
         await this.waitForTree();
         const tree = await this.readTree();
-        this.log.say(`课程共 ${tree.chapters.length} 章 ${tree.total} 节，当前：${tree.current ? tree.current.title || '未命名' : '未定位'}`);
+        this.currentTitle = tree.current ? tree.current.title || '' : '';
+        this.log.say(`课程共 ${tree.chapters.length} 章 ${tree.total} 节，当前：${this.currentTitle || '未定位'}`);
+        this.log.say('开始了。可以把浏览器窗口放到后面去，但别最小化。按 Ctrl+C 停止。');
 
         while (!this.stopped) {
             if (this.config.maxSections > 0 && this.sectionsDone >= this.config.maxSections) {

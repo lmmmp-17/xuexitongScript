@@ -9,6 +9,7 @@ import { CourseRunner, pickNextSection } from '../src/course.mjs';
 import { createLogger } from '../src/logger.mjs';
 import { chromeLaunchHint, describePlatform, findChrome, chromeCandidates, dedicatedChromeArgs } from '../src/platform.mjs';
 import { launchOptions, launchDedicatedChrome, pickCoursePage } from '../src/browser.mjs';
+import { resolve } from 'node:path';
 import { ensureInstalled } from '../src/setup.mjs';
 import { createServer } from 'node:http';
 
@@ -264,7 +265,9 @@ test('指针微动的间隔铺满配置区间, 不被轮询压成固定节拍', 
         }
         const gaps = fired.slice(1).map((at, i) => (at - fired[i]) / 1000);
         const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-        assert.ok(mean > 32 && mean < 48, `平均间隔应在区间中部, 实际 ${mean.toFixed(1)} 秒`);
+        /* 对数正态在 [18,55] 秒上的均值约 40 秒(实测 25 轮落在 39.7~44.5)。
+         * 每轮重抽阈值的老写法会把它压到约 25 秒——这条就是用来挡那个的。 */
+        assert.ok(mean > 34 && mean < 50, `平均间隔应接近分布本身的均值, 实际 ${mean.toFixed(1)} 秒`);
         assert.ok(gaps.filter((g) => g > 45).length > gaps.length * 0.15, '应当有相当比例的长间隔');
         assert.ok(gaps.every((g) => g >= 18), `不应比配置的下限还快: ${Math.min(...gaps).toFixed(1)}`);
     } finally {
@@ -435,7 +438,8 @@ test('连不上时自动启动专用 Chrome：独立进程、不跟着脚本退�
     assert.equal(call.options.stdio, 'ignore');
     assert.equal(unref, 1);
     assert.ok(call.args.includes(`--remote-debugging-port=${port}`));
-    assert.ok(call.args.includes('--user-data-dir=/tmp/p'));
+    /* profile 走 path.resolve, Windows 上 '/tmp/p' 会变成 C:\tmp\p, 所以同样算一次 */
+    assert.ok(call.args.includes(`--user-data-dir=${resolve('/tmp/p')}`), call.args.join(' '));
     assert.equal(call.args.at(-1), 'http://example.test/');
 });
 

@@ -2,7 +2,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = import.meta.dirname;
-const source = readFileSync(resolve(root, 'v3_optimized.js'), 'utf8').replace(/^﻿/, '');
+/* 统一成 LF 再拼: Windows 上检出的源码是 CRLF, 而下面的元数据模板是 LF,
+ * 直接拼会写出混合换行的文件, git status 永远是脏的。 */
+const source = readFileSync(resolve(root, 'v3_optimized.js'), 'utf8')
+    .replace(/^﻿/, '')
+    .replace(/\r\n/g, '\n');
 const metadata = `// ==UserScript==
 // @name         学习通自动刷课脚本 V3 稳定版
 // @namespace    local.codex.xuexitong

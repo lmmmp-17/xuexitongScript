@@ -324,10 +324,19 @@ test('一键启动：连不上时自己开专用 Chrome，打开起始页，webd
         assert.ok(page, '专用 Chrome 应当打开了起始页');
         assert.equal(await page.evaluate(() => navigator.webdriver), false, '自己启动的 Chrome 不应带自动化标志');
     } finally {
-        if (browser) await browser.close().catch(() => {});
+        /* 真正把浏览器关掉要走 CDP 的 Browser.close：
+         * 管理员身份下 Chrome 会先降权再重启一次, 我们 spawn 到的那个 pid 早就退了,
+         * process.kill 杀不到真正的浏览器, 进程留着不放手, profile 目录就删不掉(EBUSY)。 */
+        if (browser) {
+            await browser.newBrowserCDPSession()
+                .then((cdp) => cdp.send('Browser.close'))
+                .catch(() => {});
+            await browser.close().catch(() => {});
+        }
         if (pid) { try { process.kill(pid); } catch (e) { /* 已经退出 */ } }
         await server.close();
-        await new Promise((done) => setTimeout(done, 500));
-        await rm(profileDir, { recursive: true, force: true });
+        await new Promise((done) => setTimeout(done, 800));
+        /* Windows 上句柄释放有延迟, 给几次重试 */
+        await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
     }
 });
