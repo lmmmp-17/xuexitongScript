@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { writeSync } from 'node:fs';
 /* ------------------------------------------------------------------
  * 入口
  * Ctrl+C 只停自己的循环，不会去关你的浏览器窗口。
@@ -111,16 +112,22 @@ async function main() {
     }
 }
 
-const goodbye = (code) => {
-    if (parting) console.log(parting);
+/* 收尾的几句用 writeSync 直接写 fd，并且跟错误走同一个流。
+ *
+ * console.log / console.error 写到管道或文件时是各自缓冲的，混着用顺序会颠倒：
+ * Windows 上实测「专用 Chrome 还开着」被刷到了错误信息前面。另外 process.exit
+ * 会丢掉还没刷出去的异步写，writeSync 不会。 */
+const goodbye = (code, failure = '') => {
+    const fd = code === 0 ? 1 : 2;
+    const text = (failure ? `\n${failure}\n` : '') + (parting ? `${parting}\n` : '');
+    if (text) writeSync(fd, text);
     process.exit(code);
 };
 
 main().then(
     (code) => goodbye(code ?? 0),
     (error) => {
-        console.error(`\n${error.message}`);
         if (process.env.DEBUG) console.error(error);
-        goodbye(1);
+        goodbye(1, error.message);
     }
 );
