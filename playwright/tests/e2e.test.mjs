@@ -213,18 +213,19 @@ async function runMooc2(t, overrides, query = '') {
     }
 }
 
-test('mooc2: 视频已完成时不点"重播", 剩测验时按默认配置停下', async (t) => {
-    const out = await runMooc2(t, {});
+test('mooc2: 只剩计分测验的小节按默认配置跳过, 加 --no-auto-advance-no-video 才停下', async (t) => {
+    /* 计分的测验我们不代做, 也不该卡在那里: 默认跳过去找下一个有视频的小节 */
+    const out = await runMooc2(t, { autoAdvanceNoVideo: false });
     if (!out) return;
     const { probe } = out;
     assert.equal(probe.replays, 0, `不应重放已完成的视频: ${probe.log.join(' | ')}`);
     assert.equal(probe.realPlayClicks, 0, '这一节没有要播的视频');
-    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A'], '默认配置下应停在 1.1, 不自动跳节');
+    assert.deepEqual(probe.log.filter((e) => e.startsWith('open:')), ['open:A'], '关掉之后应当停在 1.1');
     assert.deepEqual(probe.rejected, []);
 });
 
-test('mooc2: 开启自动跳节后, 跳过已完成的视频、真实点击播完没看的那一节', async (t) => {
-    const out = await runMooc2(t, { autoAdvanceNoVideo: true });
+test('mooc2: 默认跳过已完成和只剩测验的小节、真实点击播完没看的那一节', async (t) => {
+    const out = await runMooc2(t, {});
     if (!out) return;
     const { probe, runner } = out;
     assert.deepEqual(probe.rejected, [], `出现不可信事件: ${probe.rejected}`);

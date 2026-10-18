@@ -14,15 +14,26 @@ import { createServer } from 'node:http';
 
 const silent = createLogger('silent');
 
-test('等待时长会抖动，不落在同一个值上', () => {
-    const values = new Set();
-    for (let i = 0; i < 40; i += 1) values.add(human.ms(1000));
-    assert.ok(values.size > 15, `应当分散，实际只有 ${values.size} 种`);
-    assert.equal([...values].every((ms) => ms === 1000), false);
+/* 本地靶场实测：真人连续操作的间隔变异系数(标准差/均值)是 0.45~0.49。
+ * 以前的「区间内均匀取值」只有 0.17~0.28——同样随机，但分布形状不是一回事。 */
+function dispersion(sample) {
+    const values = Array.from({ length: 20000 }, sample);
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / (values.length - 1));
+    const sorted = [...values].sort((a, b) => a - b);
+    return { mean, cv: sd / mean, min: sorted[0], median: sorted[Math.floor(values.length / 2)] };
+}
 
-    const ranged = new Set();
-    for (let i = 0; i < 40; i += 1) ranged.add(human.ms([200, 400]));
-    assert.ok([...ranged].every((ms) => ms >= 200 && ms <= 400), '区间形式不应越界');
+test('等待时长的离散度贴近真人实测值，而不是均匀分布', () => {
+    for (const spec of [[200, 400], [2600, 9000], 1000]) {
+        const { cv, median, min } = dispersion(() => human.ms(spec));
+        assert.ok(cv > 0.40 && cv < 0.55, `${JSON.stringify(spec)} 的 CV 应接近真人的 0.45~0.49，实际 ${cv.toFixed(3)}`);
+        const center = Array.isArray(spec) ? (spec[0] + spec[1]) / 2 : spec;
+        assert.ok(Math.abs(median - center) / center < 0.1, `中位数应当还在配置的中心附近，实际 ${median}`);
+        if (Array.isArray(spec)) assert.ok(min >= spec[0], `不应比配置的下限还快，实际 ${min}`);
+    }
+    /* ratio 传了就按它收窄：保活、冷却这类内部节拍不需要真人那么散 */
+    assert.ok(dispersion(() => human.ms(8000, 0.25)).cv < 0.3);
 });
 
 test('落点集中在元素中部且不是几何正中心', () => {
@@ -253,9 +264,9 @@ test('指针微动的间隔铺满配置区间, 不被轮询压成固定节拍', 
         }
         const gaps = fired.slice(1).map((at, i) => (at - fired[i]) / 1000);
         const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-        assert.ok(mean > 32 && mean < 41, `平均间隔应在区间中部, 实际 ${mean.toFixed(1)} 秒`);
+        assert.ok(mean > 32 && mean < 48, `平均间隔应在区间中部, 实际 ${mean.toFixed(1)} 秒`);
         assert.ok(gaps.filter((g) => g > 45).length > gaps.length * 0.15, '应当有相当比例的长间隔');
-        assert.ok(gaps.every((g) => g >= 18 && g <= 56.5), `不应越出区间: ${Math.min(...gaps)}–${Math.max(...gaps)}`);
+        assert.ok(gaps.every((g) => g >= 18), `不应比配置的下限还快: ${Math.min(...gaps).toFixed(1)}`);
     } finally {
         Date.now = realNow;
     }

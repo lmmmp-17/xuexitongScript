@@ -509,7 +509,42 @@ export class CourseRunner {
         return `${m}:${s}`;
     }
 
+    /* 刚接管页面时先真实地动一下：移动指针、小幅滚一下再滚回来。
+     *
+     * 两个理由：
+     * 1. 人打开一个页面本来就会先动一动、滚一下看看，不会盯着不动好几秒。
+     * 2. 本地靶场实测：被调试端口接管的浏览器里（Playwright 自己启动和接管已有
+     *    Chrome 都一样），navigator.userActivation.hasBeenActive 会在页面加载约
+     *    1.5 秒后自行变成 true，而普通 Chrome 要等真实交互。于是出现一个自相
+     *    矛盾的状态——「浏览器说用户激活过，页面却一个可信输入事件都没收到」。
+     *    以前的 1.2~5.5 秒启动延迟反而让这个状态一直挂着：越是加「像人的延迟」，
+     *    这个窗口开得越久。先做一次真实输入就把它合上了。
+     *
+     * 用滚轮而不是点击：滚轮同样是可信输入，但不会触发页面上任何东西。 */
+    async settleIn() {
+        try {
+            /* 接管之后先有个反应时间，不要在同一毫秒就动 */
+            await sleepFor([250, 900]);
+            const size = this.page.viewportSize() || await this.page.evaluate(
+                () => ({ width: window.innerWidth, height: window.innerHeight }),
+            );
+            await this.pointer.moveTo({
+                x: size.width * human.float(0.3, 0.7),
+                y: size.height * human.float(0.3, 0.6),
+            });
+            const delta = human.int(90, 260);
+            await this.page.mouse.wheel(0, delta);
+            await sleepFor([400, 1200]);
+            /* 滚回原处，不改变页面位置 */
+            await this.page.mouse.wheel(0, -delta);
+            this.log.trace('已做一次真实滚动');
+        } catch (e) {
+            this.log.trace('开场滚动失败，跳过:', e.message.split('\n')[0]);
+        }
+    }
+
     async run() {
+        await this.settleIn();
         await this.waitForTree();
         const tree = await this.readTree();
         this.log.say(`课程共 ${tree.chapters.length} 章 ${tree.total} 节，当前：${tree.current ? tree.current.title || '未命名' : '未定位'}`);
@@ -550,10 +585,11 @@ export class CourseRunner {
                     ? `还剩 ${pendingOther} 个非视频任务点(章节测验等)需要你自己完成`
                     : (jobs.length ? '本节任务点已全部完成' : '本节没有任务点');
                 if (!this.config.autoAdvanceNoVideo && pendingOther) {
-                    this.log.warn(`本节没有待播的视频, ${rest}。已停下; 确认后加 --auto-advance-no-video 可自动跳到下一节。`);
+                    this.log.warn(`本节没有待播的视频, ${rest}。按配置停下; 去掉 --no-auto-advance-no-video 可自动跳过。`);
                     return;
                 }
-                this.log.say(`本节没有待播的视频, ${rest}, 切到下一节`);
+                /* 计分的测验、课件这些我们不代做, 跳过去找下一个有视频的小节 */
+                this.log.say(`本节没有待播的视频, ${rest}, 跳过, 继续找下一个有视频的小节`);
                 if (!await this.gotoNextSection()) return;
                 continue;
             }

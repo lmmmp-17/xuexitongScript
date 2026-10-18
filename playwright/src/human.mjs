@@ -22,14 +22,32 @@ export const human = {
     pick(list) {
         return list[this.int(0, list.length - 1)];
     },
-    /* 以 base 为中心抖动，并留一条长尾：真人的间隔不会整齐落在同一个区间里 */
-    spread(base, ratio = 0.35) {
-        const value = base * this.float(1 - ratio, 1 + ratio);
-        return this.chance(0.08) ? value * this.float(1.3, 2.1) : value;
+    /* 停顿时长用对数正态取样。
+     *
+     * 以前是「区间内均匀取值」加 8% 概率的长尾。问题是离散度太小：本地靶场里
+     * 实测真人连续操作的间隔变异系数(标准差/均值)是 0.45~0.49，而均匀取值只有
+     * 0.17~0.28——同样是随机，分布形状和真人不是一回事。真人的停顿是「多数偏短、
+     * 偶尔拖很久」，正是对数正态的形状。
+     *
+     * sigma 直接决定变异系数：CV = sqrt(e^(σ²) − 1)，σ=0.45 时约 0.47。 */
+    DISPERSION: 0.45,
+    lognormal(median, sigma) {
+        return median * Math.exp(this.gauss() * sigma);
     },
-    /* spec 既可以是毫秒数，也可以是 [min, max] 区间 */
+    /* 以 base 为中位数取样；ratio 就是 sigma，不传用默认离散度 */
+    spread(base, ratio) {
+        const sigma = Number.isFinite(ratio) ? ratio : this.DISPERSION;
+        /* 封顶只是防极端值（σ=0.45 时越界概率约 0.8%），不是为了收窄分布 */
+        return Math.min(base * 3, Math.max(base * 0.4, this.lognormal(base, sigma)));
+    },
+    /* spec 既可以是毫秒数，也可以是 [min, max] 区间。
+     * 区间形式取中点作中位数，下限仍是 min（不会比配置的还快），上限留长尾。 */
     ms(spec, ratio) {
-        if (Array.isArray(spec)) return Math.round(this.float(spec[0], spec[1]));
+        if (Array.isArray(spec)) {
+            const [low, high] = spec;
+            const sigma = Number.isFinite(ratio) ? ratio : this.DISPERSION;
+            return Math.round(Math.min(high * 3, Math.max(low, this.lognormal((low + high) / 2, sigma))));
+        }
         return Math.round(this.spread(Number(spec) || 0, ratio));
     },
     /* 标准正态，用来让落点集中在中心而不是均匀铺满整个元素 */

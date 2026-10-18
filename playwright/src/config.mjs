@@ -20,7 +20,10 @@ export const defaults = {
     allowScriptedPlay: true,            /* 真实点击起播失败时才退回 video.play() */
     mute: true,                         /* 起播前静音, 一点声音都不出; --no-mute 关掉 */
     resumeWhileHidden: true,
-    autoAdvanceNoVideo: false,
+    /* 本节没有待播的视频(剩下的是计分测验、课件等)时直接去下一节。
+     * 计分的测验我们不碰, 也不该卡在那里, 所以默认跳过; --no-auto-advance-no-video
+     * 可以改回「停下来等你处理」。 */
+    autoAdvanceNoVideo: true,
     maxSections: 0,                     /* 0 = 不限 */
     maxChapterTestTries: 3,
     maxStepSwitchTries: 4,
@@ -138,7 +141,8 @@ export const helpText = `
 
 行为
   --max-sections <n>      播完 n 节就停，默认不限
-  --auto-advance-no-video 没有待播视频的小节直接跳到下一节（默认停下）
+  --no-auto-advance-no-video
+                          本节只剩测验等非视频任务点时停下来（默认直接跳到下一节）
   --no-mute               起播时不静音（默认静音，不会外放）
   --playback-rate <倍速>  默认 1（不写 playbackRate）
   --playback-rate-jitter <幅度>
