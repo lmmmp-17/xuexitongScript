@@ -156,8 +156,8 @@ export function createPointer(page, options = {}) {
 
     /* 走不通人类化路径时交给 Playwright 自己的 click: 它会等元素可交互,
      * 等不到就抛错——宁可报错, 也不能在空白处按下去当作点过了。 */
-    async function fallback(locator, reason) {
-        await locator.click({ timeout: options.fallbackTimeoutMs ?? 15000 });
+    async function fallback(locator, reason, timeoutMs) {
+        await locator.click({ timeout: timeoutMs ?? options.fallbackTimeoutMs ?? 15000 });
         return { fallback: reason };
     }
 
@@ -170,10 +170,10 @@ export function createPointer(page, options = {}) {
          * 点过了——学习通目录收起时工具就是这样在同一节上原地打转的。 */
         const { width, height } = await viewport();
         const inView = box.x >= 0 && box.y >= 0 && box.x + box.width <= width && box.y + box.height <= height;
-        if (!inView) return fallback(locator, '目标在视口外');
+        if (!inView) return fallback(locator, '目标在视口外', clickOptions.timeoutMs);
 
         const target = await moveToBox(box);
-        if (!await hits(locator, box, target)) return fallback(locator, '落点被其它元素挡住');
+        if (!await hits(locator, box, target)) return fallback(locator, '落点被其它元素挡住', clickOptions.timeoutMs);
 
         /* 移到位之后先停一下再按下：人不会在指针停住的同一毫秒按键 */
         await sleep(human.int(45, 190));

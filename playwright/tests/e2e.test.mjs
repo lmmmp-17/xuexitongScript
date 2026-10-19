@@ -238,6 +238,10 @@ test('mooc2: 默认跳过已完成和只剩测验的小节、真实点击播完�
     const mutedAt = probe.log.indexOf('muted:B');
     assert.ok(mutedAt >= 0 && mutedAt < probe.log.indexOf('play:big:B'), `应当先静音再起播: ${probe.log.join(' | ')}`);
     assert.equal(probe.scriptedPlays, 0, '不应退回 video.play()');
+    /* 倍速走播放器自己的菜单: 先点开菜单, 再点最高的那一档 */
+    assert.ok(probe.log.includes("rate-menu-open"), `应当点开倍速菜单: ${probe.log.join(" | ")}`);
+    assert.ok(probe.log.includes("rate:2:B"), `应当切到菜单里最高的 2x: ${probe.log.join(" | ")}`);
+    assert.ok(probe.log.indexOf('rate:2:B') < probe.log.indexOf('ended:B'), '倍速应当在播完之前就切好');
     assert.equal(runner.sectionsDone, 1, '只有 2.2 是真正放了视频的');
 });
 

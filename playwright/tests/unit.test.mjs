@@ -10,6 +10,7 @@ import { createLogger } from '../src/logger.mjs';
 import { chromeLaunchHint, describePlatform, findChrome, chromeCandidates, dedicatedChromeArgs } from '../src/platform.mjs';
 import { launchOptions, launchDedicatedChrome, pickCoursePage } from '../src/browser.mjs';
 import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { ensureInstalled } from '../src/setup.mjs';
 import { createServer } from 'node:http';
 
@@ -76,7 +77,7 @@ test('指针轨迹是曲线、起步慢、终点精确', async () => {
 
 test('参数解析：支持区间外的覆盖、拒绝错误输入', () => {
     assert.equal(parseArgs([]).config.mode, 'connect', '默认走 connect');
-    assert.equal(defaults.playbackRate, 1, '默认不改倍速');
+    assert.equal(defaults.playbackRate, 'max', '默认切到菜单里最高的一档');
 
     const parsed = parseArgs(['--launch', '--cdp-port=9444', '--max-sections', '2', '--no-idle-activity']);
     assert.equal(parsed.config.mode, 'launch');
@@ -275,23 +276,115 @@ test('指针微动的间隔铺满配置区间, 不被轮询压成固定节拍', 
     }
 });
 
-test('倍速：默认一次都不写 playbackRate', async () => {
-    let writes = 0;
-    const video = { locator: { async evaluate() { writes += 1; return undefined; } } };
-    const runner = new CourseRunner({ page: fakePage({}), pointer: {}, config: { ...defaults }, log: silent });
-    assert.equal(await runner.applyPlaybackRate(video), 1);
-    assert.equal(writes, 0, '默认配置不应写入 playbackRate');
-
-    const jitter = new CourseRunner({
-        page: fakePage({}),
-        pointer: {},
-        config: { ...defaults, playbackRate: 1.5, playbackRateJitter: 0.08 },
-        log: silent,
+/* 造一个倍速菜单: 档位照真实页面实测的 [0.75, 1, 1.25, 1.5, 2]。
+ * 真实页面上当前选中的那条文字是 "1x, 选择", 所以解析要容得下后缀。 */
+function fakeRateMenu({ rates = [2, 1.5, 1.25, 1, 0.75], current = 1, clicks = [], opensOnHover = true } = {}) {
+    const state = { rate: current, clicks, opened: opensOnHover };
+    const locator = (selector) => ({
+        first: () => locator(selector),
+        nth: (index) => ({ ...locator(selector), index }),
+        async count() { return selector.includes('menu-item') ? rates.length : 1; },
+        async boundingBox() { return { x: 0, y: 0, width: 800, height: 450 }; },
+        /* 菜单没展开时档位是不可见的, 和真实页面一样(实测 rect 全是 0) */
+        async isVisible() { return selector.includes('menu-item') ? state.opened : true; },
+        async evaluateAll(fn) {
+            return fn(rates.map((rate, i) => ({
+                textContent: i === rates.indexOf(current) ? `${rate}x, 选择` : `${rate}x`,
+            })));
+        },
+        selector,
     });
-    const rates = new Set();
-    for (let i = 0; i < 10; i += 1) rates.add(await jitter.applyPlaybackRate(video));
-    assert.ok(rates.size > 1, '开启抖动后不应是死值');
-    assert.ok([...rates].every((rate) => rate > 1.4 && rate < 1.6));
+    return {
+        state,
+        video: {
+            frame: { locator },
+            locator: {
+                async evaluate(fn) {
+                    void fn;
+                    return { currentTime: 0, duration: 100, paused: false, ended: false,
+                        muted: true, readyState: 4, rate: state.rate };
+                },
+            },
+        },
+        pointer: {
+            async moveTo() {},
+            async click(target) {
+                clicks.push(target.selector);
+                /* 点按钮展开菜单; 点中档位才真正改倍速, 和播放器的行为一致 */
+                if (target.selector.includes('menu-item')) {
+                    if (!state.opened) throw new Error('菜单没展开, 点不到');
+                    state.rate = rates[target.index];
+                } else {
+                    state.opened = true;
+                }
+            },
+        },
+    };
+}
+
+test('倍速：默认切到菜单里最高的一档，用的是播放器自己的菜单', async () => {
+    /* 悬停就展开的播放器: 不用多点一下按钮 */
+    const hover = fakeRateMenu({ opensOnHover: true });
+    const runner = new CourseRunner({
+        page: fakePage({}), pointer: hover.pointer, config: { ...defaults }, log: silent,
+    });
+    assert.equal(await runner.applyPlaybackRate(hover.video), 2);
+    assert.equal(hover.state.rate, 2);
+    assert.deepEqual(hover.state.clicks.filter((s) => !s.includes('menu-item')), [], '悬停就展开时不必点按钮');
+    assert.ok(hover.state.clicks.some((s) => s.includes('menu-item')), '应当点具体档位');
+
+    /* 必须点一下才展开的播放器 */
+    const needsClick = fakeRateMenu({ opensOnHover: false });
+    const second = new CourseRunner({
+        page: fakePage({}), pointer: needsClick.pointer, config: { ...defaults }, log: silent,
+    });
+    assert.equal(await second.applyPlaybackRate(needsClick.video), 2);
+    assert.ok(needsClick.state.clicks[0].includes('vjs-playback-rate button'), '应当先点开菜单');
+    assert.ok(needsClick.state.clicks[1].includes('menu-item'));
+});
+
+test('倍速：给了数字就取不超过它的最高档；给 1 则完全不碰', async () => {
+    const capped = fakeRateMenu();
+    const runner = new CourseRunner({
+        page: fakePage({}), pointer: capped.pointer,
+        config: { ...defaults, playbackRate: 1.3 }, log: silent,
+    });
+    assert.equal(await runner.applyPlaybackRate(capped.video), 1.25);
+
+    const untouched = fakeRateMenu();
+    const plain = new CourseRunner({
+        page: fakePage({}), pointer: untouched.pointer,
+        config: { ...defaults, playbackRate: 1 }, log: silent,
+    });
+    assert.equal(await plain.applyPlaybackRate(untouched.video), null);
+    assert.deepEqual(untouched.state.clicks, [], 'playbackRate=1 时一次都不该点');
+});
+
+test('倍速：没有倍速菜单就保持原速，而且不存在写 playbackRate 的退路', async () => {
+    /* 平台不让改倍速时这个控件根本不存在 */
+    const clicks = [];
+    const video = {
+        frame: { locator: () => ({ first: () => ({ async count() { return 0; } }), async count() { return 0; } }) },
+        locator: { async evaluate() { return null; } },
+    };
+    const runner = new CourseRunner({
+        page: fakePage({}), pointer: { async click(t) { clicks.push(t); } },
+        config: { ...defaults }, log: silent,
+    });
+    assert.equal(await runner.applyPlaybackRate(video), null);
+    assert.deepEqual(clicks, []);
+    /* 倍速只能来自播放器菜单: 写属性等于绕过平台自己的控件, 源码里不该再有这条路 */
+    const source = await readFile(new URL('../src/course.mjs', import.meta.url), 'utf8');
+    assert.equal(/playbackRate\s*=[^=]/.test(source), false, '不应退回写 playbackRate');
+});
+
+test('倍速：已经是最高档就不再点菜单', async () => {
+    const menu = fakeRateMenu({ current: 2 });
+    const runner = new CourseRunner({
+        page: fakePage({}), pointer: menu.pointer, config: { ...defaults }, log: silent,
+    });
+    assert.equal(await runner.applyPlaybackRate(menu.video), 2);
+    assert.deepEqual(menu.state.clicks, []);
 });
 
 test('launch 模式的启动参数不引入新特征', () => {

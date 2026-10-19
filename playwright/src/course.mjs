@@ -290,17 +290,82 @@ export class CourseRunner {
         return false;
     }
 
+    /* 把鼠标移进播放器，video.js 的控制栏才会显示出来 */
+    async revealControls(video) {
+        const box = await video.frame.locator(SEL.player).first().boundingBox().catch(() => null);
+        if (!box) return false;
+        await this.pointer.moveTo({
+            x: box.x + box.width * human.float(0.3, 0.7),
+            y: box.y + box.height * human.float(0.6, 0.88),
+        });
+        await sleepFor([300, 800]);
+        return true;
+    }
+
+    /* 读播放器倍速菜单里有哪些档位。没有这个控件就返回 null（平台不让改倍速） */
+    async readRates(video) {
+        const items = video.frame.locator(SEL.rateMenuItem);
+        if (await items.count() === 0) return null;
+        /* 选中的那条文字是 "1x, 选择"，parseFloat 取前面的数就行 */
+        return items.evaluateAll((nodes) => nodes
+            .map((node, index) => ({ index, rate: parseFloat(node.textContent.trim()) }))
+            .filter((item) => Number.isFinite(item.rate) && item.rate > 0));
+    }
+
+    /* 倍速切到播放器自己允许的最高档。
+     *
+     * 走播放器的菜单，不写 video.playbackRate：菜单里列出来的才是平台允许的档位，
+     * 倍速标签也由播放器自己更新。平台不让改倍速时这个控件根本不存在，那就不动。
+     * --playback-rate 1 等于维持原样；给具体数字则取不超过它的最高档。 */
     async applyPlaybackRate(video) {
-        const base = Number(this.config.playbackRate) || 1;
-        const jitter = Math.max(0, Number(this.config.playbackRateJitter) || 0);
-        /* 默认 1 且不抖动时一次都不写：倍速会随播放心跳上报 */
-        if (base === 1 && jitter === 0) return 1;
-        const rate = jitter > 0
-            ? Number(human.float(Math.max(0.0625, base - jitter), base + jitter).toFixed(3))
-            : base;
-        await video.locator.evaluate((el, value) => { el.playbackRate = value; }, rate);
-        this.log.note(`倍速设为 ${rate}x`);
-        return rate;
+        const wanted = this.config.playbackRate;
+        if (wanted !== 'max' && !(Number(wanted) > 1)) return null;
+
+        const current = await this.videoState(video);
+        const rates = await this.readRates(video);
+        if (!rates || !rates.length) {
+            this.log.note('这个播放器没有倍速菜单，保持原速');
+            return null;
+        }
+        const allowed = wanted === 'max' ? rates : rates.filter((item) => item.rate <= Number(wanted));
+        if (!allowed.length) {
+            this.log.note(`倍速菜单里没有不超过 ${wanted}x 的档位，保持原速`);
+            return null;
+        }
+        const target = allowed.reduce((best, item) => (item.rate > best.rate ? item : best));
+        if (current && Math.abs(current.rate - target.rate) < 0.01) {
+            this.log.note(`倍速已经是 ${target.rate}x`);
+            return target.rate;
+        }
+
+        try {
+            await this.revealControls(video);
+            const item = video.frame.locator(SEL.rateMenuItem).nth(target.index);
+            /* 先把指针移到倍速按钮上：这类菜单多半悬停就展开。没展开再点一下
+             * （video.js 点击会加 vjs-lock-showing，移开指针也不收起来）。 */
+            const button = video.frame.locator(SEL.rateButton).first();
+            const box = await button.boundingBox();
+            if (box) await this.pointer.moveTo({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+            await sleepFor([250, 700]);
+            if (!await item.isVisible().catch(() => false)) {
+                await this.pointer.click(button, { timeoutMs: 4000 });
+                await sleepFor([250, 700]);
+            }
+            await this.pointer.click(item, { timeoutMs: 4000 });
+            await sleepFor([300, 800]);
+        } catch (e) {
+            this.log.note(`点倍速菜单没成功，保持原速: ${e.message.split('\n')[0]}`);
+            return null;
+        }
+
+        const after = await this.videoState(video);
+        if (!after || Math.abs(after.rate - target.rate) >= 0.01) {
+            /* 平台可能锁了倍速。不去写 playbackRate 硬改——那等于绕过它自己的控件 */
+            this.log.note(`倍速没能切到 ${target.rate}x（当前 ${after ? after.rate : '未知'}x），按原速播`);
+            return after ? after.rate : null;
+        }
+        this.log.say(`倍速切到 ${target.rate}x（菜单里最高的一档）`);
+        return target.rate;
     }
 
     /* 轮询进度。间隔每轮重抽，不去踩整秒 */
@@ -640,6 +705,8 @@ export class CourseRunner {
                 continue;
             }
 
+            /* 倍速在起播之前调好：起播后再调，开头那几秒就白跑在 1x 了，
+             * 短视频甚至可能在菜单点完之前就播完。 */
             await this.applyPlaybackRate(video);
             if (!await this.startPlayback(video)) {
                 this.log.warn('这一节起播失败，已停下');

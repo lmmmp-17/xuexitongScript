@@ -21,6 +21,12 @@ export const SEL = {
     video: 'video#video_html5_api, video[id*="video_html5"]',
     bigPlayButton: '.vjs-big-play-button',
     playControl: '.vjs-play-control',
+    /* 倍速：video.js 的菜单按钮。实测这个播放器提供 0.75 / 1 / 1.25 / 1.5 / 2 五档，
+     * 菜单项文字形如 "2x"，当前选中的那条是 "1x, 选择"（带 .vjs-selected）。
+     * 平台不让改倍速时这个控件根本不存在，那就不动它。 */
+    player: '.video-js',
+    rateButton: '.vjs-playback-rate button',
+    rateMenuItem: '.vjs-playback-rate .vjs-menu-item',
 };
 
 export const ALLOWED_HOSTS = ['chaoxing.com'];

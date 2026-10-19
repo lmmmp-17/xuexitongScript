@@ -15,8 +15,10 @@ export const defaults = {
     waitCourseMs: 0,                    /* 等用户打开课程页的上限，0 = 一直等 */
 
     /* 播放 */
-    playbackRate: 1,                    /* 默认不改倍速 */
-    playbackRateJitter: 0,
+    /* 'max' = 切到播放器倍速菜单里最高的一档(实测学习通和雨课堂都提供到 2x)。
+     * 给数字则取不超过它的最高档; 给 1 就完全不碰倍速。
+     * 只会用菜单里列出来的档位——那才是平台允许的, 也不用去写 playbackRate。 */
+    playbackRate: 'max',
     allowScriptedPlay: true,            /* 真实点击起播失败时才退回 video.play() */
     mute: true,                         /* 起播前静音, 一点声音都不出; --no-mute 关掉 */
     resumeWhileHidden: true,
@@ -52,7 +54,7 @@ export const defaults = {
 };
 
 const NUMBERS = new Set([
-    'cdpPort', 'playbackRate', 'playbackRateJitter', 'maxSections', 'maxChapterTestTries',
+    'cdpPort', 'maxSections', 'maxChapterTestTries',
     'treeTimeoutMs', 'pollIntervalMs', 'guardNoProgressMs', 'resumeCooldownMs', 'longBreakChance', 'waitCourseMs',
     'maxStepSwitchTries', 'videoWaitMs', 'actionTimeoutMs', 'jobsWaitMs', 'sectionSwitchWaitMs',
 ]);
@@ -144,8 +146,8 @@ export const helpText = `
   --no-auto-advance-no-video
                           本节只剩测验等非视频任务点时停下来（默认直接跳到下一节）
   --no-mute               起播时不静音（默认静音，不会外放）
-  --playback-rate <倍速>  默认 1（不写 playbackRate）
-  --playback-rate-jitter <幅度>
+  --playback-rate <倍速>  默认 max，切到播放器倍速菜单里最高的一档；
+                          给数字则取不超过它的最高档，给 1 就完全不碰倍速
   --no-idle-activity      关掉播放期间的指针微动
   --no-resume-while-hidden  页面在后台时不去动播放状态
   --no-allow-scripted-play  禁止退回 video.play()，只用真实点击
