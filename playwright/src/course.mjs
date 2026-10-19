@@ -338,34 +338,40 @@ export class CourseRunner {
             return target.rate;
         }
 
-        try {
-            await this.revealControls(video);
-            const item = video.frame.locator(SEL.rateMenuItem).nth(target.index);
-            /* 先把指针移到倍速按钮上：这类菜单多半悬停就展开。没展开再点一下
-             * （video.js 点击会加 vjs-lock-showing，移开指针也不收起来）。 */
-            const button = video.frame.locator(SEL.rateButton).first();
-            const box = await button.boundingBox();
-            if (box) await this.pointer.moveTo({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
-            await sleepFor([250, 700]);
-            if (!await item.isVisible().catch(() => false)) {
-                await this.pointer.click(button, { timeoutMs: 4000 });
+        /* 点偏了就再来一次：控制栏刚弹出来那一下坐标容易读早 */
+        for (let attempt = 1; attempt <= 2 && !this.stopped; attempt += 1) {
+            try {
+                await this.revealControls(video);
+                const item = video.frame.locator(SEL.rateMenuItem).nth(target.index);
+                /* 先把指针移到倍速按钮上：这类菜单多半悬停就展开。没展开再点一下
+                 * （video.js 点击会加 vjs-lock-showing，移开指针也不收起来）。 */
+                const button = video.frame.locator(SEL.rateButton).first();
+                const box = await button.boundingBox();
+                if (box) await this.pointer.moveTo({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
                 await sleepFor([250, 700]);
+                if (!await item.isVisible().catch(() => false)) {
+                    await this.pointer.click(button, { timeoutMs: 4000 });
+                    await sleepFor([250, 700]);
+                }
+                await this.pointer.click(item, { timeoutMs: 4000 });
+                await sleepFor([300, 800]);
+            } catch (e) {
+                this.log.trace(`点倍速菜单第 ${attempt} 次没成功: ${e.message.split('\n')[0]}`);
             }
-            await this.pointer.click(item, { timeoutMs: 4000 });
-            await sleepFor([300, 800]);
-        } catch (e) {
-            this.log.note(`点倍速菜单没成功，保持原速: ${e.message.split('\n')[0]}`);
-            return null;
-        }
 
-        const after = await this.videoState(video);
-        if (!after || Math.abs(after.rate - target.rate) >= 0.01) {
+            /* 不管有没有抛错都按实际倍速判断：点偏到别的档位时也会抛超时，
+             * 那时倍速其实已经变了，不能照着"没动过"去报。 */
+            const after = await this.videoState(video);
+            if (after && Math.abs(after.rate - target.rate) < 0.01) {
+                this.log.say(`倍速切到 ${target.rate}x（菜单里最高的一档）`);
+                return target.rate;
+            }
+            if (attempt < 2) continue;
             /* 平台可能锁了倍速。不去写 playbackRate 硬改——那等于绕过它自己的控件 */
-            this.log.note(`倍速没能切到 ${target.rate}x（当前 ${after ? after.rate : '未知'}x），按原速播`);
+            this.log.note(`倍速没能切到 ${target.rate}x（当前 ${after ? after.rate : '未知'}x），按这个速度播`);
             return after ? after.rate : null;
         }
-        this.log.say(`倍速切到 ${target.rate}x（菜单里最高的一档）`);
-        return target.rate;
+        return null;
     }
 
     /* 轮询进度。间隔每轮重抽，不去踩整秒 */
@@ -705,13 +711,13 @@ export class CourseRunner {
                 continue;
             }
 
-            /* 倍速在起播之前调好：起播后再调，开头那几秒就白跑在 1x 了，
-             * 短视频甚至可能在菜单点完之前就播完。 */
-            await this.applyPlaybackRate(video);
             if (!await this.startPlayback(video)) {
                 this.log.warn('这一节起播失败，已停下');
                 return;
             }
+            /* 倍速要等起播之后再调：真实页面上 .vjs-control-bar 在起播前是
+             * display:none，指针移上去也不出来，倍速按钮根本点不到。 */
+            await this.applyPlaybackRate(video);
 
             const result = await this.watchUntilEnd(video);
             if (result === 'stopped') return;

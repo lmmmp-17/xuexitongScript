@@ -6,7 +6,9 @@
   video { width: 100%; height: 100%; display: block; }
   .vjs-big-play-button { position: absolute; left: 380px; top: 200px; width: 90px; height: 60px; cursor: pointer; }
   #video.vjs-has-started .vjs-big-play-button { display: none; }
-  .vjs-control-bar { position: absolute; left: 0; bottom: 0; width: 100%; height: 46px; background: #222; }
+  /* 照实测: 控制栏在起播前是 display:none, 指针移上去也不出来 */
+  .vjs-control-bar { display: none; position: absolute; left: 0; bottom: 0; width: 100%; height: 46px; background: #222; }
+  #video.vjs-has-started .vjs-control-bar { display: block; }
   .vjs-play-control { position: absolute; left: 14px; top: 3px; width: 40px; height: 40px; cursor: pointer; }
   /* 倍速菜单照实测的 video.js 结构: 平时收起, 点按钮才固定展开 */
   .vjs-playback-rate { position: absolute; right: 14px; bottom: 3px; width: 56px; height: 40px; }

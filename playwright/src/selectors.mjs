@@ -25,6 +25,7 @@ export const SEL = {
      * 菜单项文字形如 "2x"，当前选中的那条是 "1x, 选择"（带 .vjs-selected）。
      * 平台不让改倍速时这个控件根本不存在，那就不动它。 */
     player: '.video-js',
+    controlBar: '.vjs-control-bar',
     rateButton: '.vjs-playback-rate button',
     rateMenuItem: '.vjs-playback-rate .vjs-menu-item',
 };

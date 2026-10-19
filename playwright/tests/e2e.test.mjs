@@ -241,7 +241,8 @@ test('mooc2: 默认跳过已完成和只剩测验的小节、真实点击播完�
     /* 倍速走播放器自己的菜单: 先点开菜单, 再点最高的那一档 */
     assert.ok(probe.log.includes("rate-menu-open"), `应当点开倍速菜单: ${probe.log.join(" | ")}`);
     assert.ok(probe.log.includes("rate:2:B"), `应当切到菜单里最高的 2x: ${probe.log.join(" | ")}`);
-    assert.ok(probe.log.indexOf('rate:2:B') < probe.log.indexOf('ended:B'), '倍速应当在播完之前就切好');
+    /* 控制栏起播前是 display:none(真实页面实测), 所以倍速只能起播之后调 */
+    assert.ok(probe.log.indexOf('play:big:B') < probe.log.indexOf('rate:2:B'), '倍速应当在起播之后调');
     assert.equal(runner.sectionsDone, 1, '只有 2.2 是真正放了视频的');
 });
 
