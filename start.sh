@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 学习通 Playwright 版的入口（Linux / macOS）。
-# 第一次运行会自动安装依赖；连不上 Chrome 时会自动启动一个专用的 Chrome。
+# 第一次运行会自动安装依赖；连不上浏览器时会自动启动一个专用的 Chrome（没装就用 Edge）。
 # 参数原样传给 run.mjs，比如 ./start.sh --max-sections 1
 set -euo pipefail
 cd "$(dirname "$0")/playwright"

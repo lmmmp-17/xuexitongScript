@@ -65,11 +65,11 @@ export async function hardenFocus(page, log) {
 export function noteOnVisibility() {
     return [
         'document.visibilityState 没有 CDP override，所以：',
-        '  - 把课程页放在一个单独的 Chrome 窗口里。失焦但没被遮住的窗口，其活动标签页',
+        '  - 把课程页放在一个单独的浏览器窗口里。失焦但没被遮住的窗口，其活动标签页',
         '    的 visibilityState 仍然是 visible，只有 hasFocus() 会变 false——而那一项已经被模拟掉了。',
         '  - 不要在同一个窗口里切到别的标签页，那会让课程页变成后台标签（hidden）。',
         '  - 窗口最小化也会变 hidden。放到后面、或者挪到另一个工作区都没问题——',
-        '    但 Windows 上窗口被完全盖住同样会变 hidden，要靠 Chrome 启动时带',
-        '    --disable-backgrounding-occluded-windows（脚本自己开的 Chrome 都带）。',
+        '    但 Windows 上窗口被完全盖住同样会变 hidden，要靠浏览器启动时带',
+        '    --disable-backgrounding-occluded-windows（脚本自己开的 Chrome / Edge 都带）。',
     ].join('\n');
 }

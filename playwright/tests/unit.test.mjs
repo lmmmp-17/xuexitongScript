@@ -7,8 +7,8 @@ import { parseArgs, defaults } from '../src/config.mjs';
 import { isAllowedUrl } from '../src/selectors.mjs';
 import { CourseRunner, pickNextSection } from '../src/course.mjs';
 import { createLogger } from '../src/logger.mjs';
-import { chromeLaunchHint, describePlatform, findChrome, chromeCandidates, dedicatedChromeArgs } from '../src/platform.mjs';
-import { launchOptions, launchDedicatedChrome, pickCoursePage } from '../src/browser.mjs';
+import { launchHint, describePlatform, findBrowser, browserCandidates, dedicatedArgs, sideProfileDir, kindOfPath } from '../src/platform.mjs';
+import { launchOptions, launchDedicatedBrowser, pickCoursePage, kindOfVersion, openBrowser } from '../src/browser.mjs';
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { ensureInstalled } from '../src/setup.mjs';
@@ -100,12 +100,16 @@ test('只接受 chaoxing.com 的地址', () => {
 });
 
 test('平台提示用的是独立 profile 目录', () => {
-    const hint = chromeLaunchHint(9222);
+    const hint = launchHint(9222);
     assert.match(hint, /--remote-debugging-port=9222/);
     assert.match(hint, /--user-data-dir/);
     assert.match(hint, /--mute-audio/);
     assert.match(hint, /--disable-backgrounding-occluded-windows/, 'Windows 上窗口被盖住会变 hidden，手动命令也得带');
     assert.ok(describePlatform().length > 0);
+    const edge = launchHint(9222, 'edge');
+    assert.match(edge, /edge/i);
+    assert.match(edge, /xuexitong-edge/, 'Edge 用自己的 profile 目录');
+    assert.match(launchHint(9222, 'edge', '/opt/edge/msedge'), /^"\/opt\/edge\/msedge" /, '找到了就用实际位置');
 });
 
 /* 用假 page 验证切节决策，不需要浏览器 */
@@ -401,6 +405,7 @@ test('launch 模式的启动参数不引入新特征', () => {
     assert.equal(options.locale, 'zh-CN');
     assert.ok(options.args.includes('--mute-audio'), '默认在浏览器这一层也静音');
     assert.equal(launchOptions({ mute: false }).args.includes('--mute-audio'), false);
+    assert.equal(launchOptions({ kind: 'edge' }).channel, 'msedge', '选了 Edge 就用本机 Edge');
 });
 
 test('指针起点必须是 (0,0)，否则第一次移动会带一个瞬移位移', () => {
@@ -479,34 +484,89 @@ test('切节：点了目录却没切过去时重试一次就停下，不原地�
     assert.equal(runner.stopped, true, '切不过去就该停下');
 });
 
-test('找 Chrome：Windows / macOS 看固定位置，Linux 在 PATH 里找，--chrome-path 优先', () => {
-    const win = chromeCandidates('win32', { PROGRAMFILES: 'C:\\Program Files', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' });
+test('找浏览器：Windows / macOS 看固定位置，Linux 在 PATH 里找，--browser-path 优先', () => {
+    const win = browserCandidates('chrome', 'win32', { PROGRAMFILES: 'C:\\Program Files', LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' });
     assert.equal(win[0], 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
     assert.ok(win.some((p) => p.startsWith('C:\\Users\\u\\AppData\\Local')), '要包括只给当前用户装的位置');
-    const winHit = findChrome({ platform: 'win32', env: { LOCALAPPDATA: 'C:\\L' }, exists: (p) => p.startsWith('C:\\L') });
-    assert.equal(winHit, 'C:\\L\\Google\\Chrome\\Application\\chrome.exe');
+    const winHit = findBrowser({ platform: 'win32', env: { LOCALAPPDATA: 'C:\\L' }, exists: (p) => p.startsWith('C:\\L') });
+    assert.deepEqual(winHit, { kind: 'chrome', exe: 'C:\\L\\Google\\Chrome\\Application\\chrome.exe' });
 
-    const linux = findChrome({ platform: 'linux', env: { PATH: '/nope:/opt/bin' }, exists: (p) => p === '/opt/bin/chromium' });
-    assert.equal(linux, '/opt/bin/chromium');
-    assert.equal(findChrome({ platform: 'linux', env: { PATH: '/nope' }, exists: () => false }), null);
+    const linux = findBrowser({ platform: 'linux', env: { PATH: '/nope:/opt/bin' }, exists: (p) => p === '/opt/bin/chromium' });
+    assert.deepEqual(linux, { kind: 'chrome', exe: '/opt/bin/chromium' });
+    assert.equal(findBrowser({ platform: 'linux', env: { PATH: '/nope' }, exists: () => false }), null);
 
-    assert.equal(findChrome({ configured: '/my/chrome', exists: (p) => p === '/my/chrome' }), '/my/chrome');
-    assert.equal(findChrome({ configured: '/missing', exists: () => false }), null, '指定的路径不存在就别悄悄换成别的');
-    assert.match(chromeCandidates('darwin', {}, '/Users/u')[0], /^\/Applications\/Google Chrome\.app/);
+    assert.deepEqual(findBrowser({ configured: '/my/chrome', exists: (p) => p === '/my/chrome' }), { kind: 'chrome', exe: '/my/chrome' });
+    assert.equal(findBrowser({ configured: '/missing', exists: () => false }), null, '指定的路径不存在就别悄悄换成别的');
+    assert.match(browserCandidates('chrome', 'darwin', {}, '/Users/u')[0], /^\/Applications\/Google Chrome\.app/);
+    assert.match(browserCandidates('edge', 'darwin', {}, '/Users/u')[0], /^\/Applications\/Microsoft Edge\.app/);
 });
 
-test('自动启动专用 Chrome 的参数：和手动命令同一组，不带任何自动化开关', () => {
-    const args = dedicatedChromeArgs({ port: 9222, profileDir: '/home/u/xuexitong-chrome', url: 'https://i.chaoxing.com/' });
+test('Edge：没装 Chrome 时 auto 用 Edge；明确选了哪个就只找哪个', () => {
+    const env = { PROGRAMFILES: 'C:\\Program Files', 'PROGRAMFILES(X86)': 'C:\\Program Files (x86)' };
+    const edgeExe = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+    assert.equal(browserCandidates('edge', 'win32', env)[0], edgeExe, 'Edge 默认装在 Program Files (x86)');
+    const onlyEdge = (p) => p === edgeExe;
+    assert.deepEqual(findBrowser({ platform: 'win32', env, exists: onlyEdge }), { kind: 'edge', exe: edgeExe });
+    assert.equal(findBrowser({ browser: 'chrome', platform: 'win32', env, exists: onlyEdge }), null, '选了 Chrome 就不悄悄换成 Edge');
+    const both = () => true;
+    assert.equal(findBrowser({ platform: 'win32', env, exists: both }).kind, 'chrome', 'auto 两个都有时用 Chrome');
+    assert.equal(findBrowser({ browser: 'edge', platform: 'win32', env, exists: both }).kind, 'edge');
+    assert.deepEqual(
+        findBrowser({ platform: 'linux', env: { PATH: '/usr/bin' }, exists: (p) => p === '/usr/bin/microsoft-edge-stable' }),
+        { kind: 'edge', exe: '/usr/bin/microsoft-edge-stable' },
+    );
+    /* --browser-path 指向 Edge、又没说 --browser 时按文件名认 */
+    assert.equal(kindOfPath('C:\\x\\msedge.exe'), 'edge');
+    assert.equal(kindOfPath('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'), 'edge');
+    assert.equal(kindOfPath('/usr/bin/google-chrome'), 'chrome');
+    assert.equal(findBrowser({ configured: '/opt/microsoft-edge', exists: () => true }).kind, 'edge');
+    assert.equal(findBrowser({ browser: 'chrome', configured: '/opt/whatever', exists: () => true }).kind, 'chrome');
+    /* profile 分开放；Chrome 沿用原来的目录，已经登录过的不用重登 */
+    assert.match(sideProfileDir('chrome'), /xuexitong-chrome$/);
+    assert.match(sideProfileDir('edge'), /xuexitong-edge$/);
+});
+
+test('调试端口上是哪种浏览器：按 /json/version 认', () => {
+    assert.equal(kindOfVersion({
+        Browser: 'Edg/141.0.3537.71',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0',
+    }), 'edge');
+    assert.equal(kindOfVersion({
+        Browser: 'Chrome/141.0.7390.65',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+    }), 'chrome');
+    assert.equal(kindOfVersion({}), 'chrome');
+});
+
+test('端口上开着另一种浏览器时不悄悄接管，说清楚怎么办', async () => {
+    const server = createServer((req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ Browser: 'Chrome/141.0.7390.65', 'User-Agent': 'Mozilla/5.0 Chrome/141.0.0.0 Safari/537.36' }));
+    });
+    await new Promise((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address();
+    try {
+        await assert.rejects(
+            openBrowser({ ...defaults, cdpPort: port, browser: 'edge' }, silent),
+            /开着的是 Chrome，不是你选的 Edge.*--cdp-port/s,
+        );
+    } finally {
+        server.close();
+    }
+});
+
+test('自动启动专用浏览器的参数：和手动命令同一组，不带任何自动化开关', () => {
+    const args = dedicatedArgs({ port: 9222, profileDir: '/home/u/xuexitong-chrome', url: 'https://i.chaoxing.com/' });
     assert.ok(args.includes('--remote-debugging-port=9222'));
     assert.ok(args.includes('--user-data-dir=/home/u/xuexitong-chrome'));
     assert.ok(args.includes('--mute-audio'), '默认静音');
     assert.ok(args.includes('--disable-backgrounding-occluded-windows'), 'Windows 上窗口被盖住会变 hidden，视频直接停');
     assert.equal(args.at(-1), 'https://i.chaoxing.com/');
     assert.equal(args.some((a) => /automation|headless|webdriver/i.test(a)), false);
-    assert.equal(dedicatedChromeArgs({ port: 1, profileDir: '/p', mute: false }).includes('--mute-audio'), false);
+    assert.equal(dedicatedArgs({ port: 1, profileDir: '/p', mute: false }).includes('--mute-audio'), false);
 });
 
-test('连不上时自动启动专用 Chrome：独立进程、不跟着脚本退出、等到调试端口就绪', async () => {
+test('连不上时自动启动专用浏览器：独立进程、不跟着脚本退出、等到调试端口就绪', async () => {
     /* 用一个假的 /json/version 充当“Chrome 起来了” */
     const server = createServer((req, res) => { res.writeHead(200); res.end('{}'); });
     await new Promise((done) => server.listen(0, '127.0.0.1', done));
@@ -514,8 +574,8 @@ test('连不上时自动启动专用 Chrome：独立进程、不跟着脚本退�
     let call = null;
     let unref = 0;
     try {
-        await launchDedicatedChrome(
-            { ...defaults, cdpPort: port, chromePath: process.execPath, chromeProfile: '/tmp/p' },
+        await launchDedicatedBrowser(
+            { ...defaults, cdpPort: port, browserPath: process.execPath, browserProfile: '/tmp/p' },
             silent,
             {
                 url: 'http://example.test/',
@@ -538,11 +598,45 @@ test('连不上时自动启动专用 Chrome：独立进程、不跟着脚本退�
     assert.equal(call.args.at(-1), 'http://example.test/');
 });
 
-test('找不到 Chrome 时说清楚怎么办', async () => {
+test('找不到浏览器时说清楚怎么办', async () => {
+    const noSpawn = { spawnProcess() { throw new Error('不应启动'); } };
     await assert.rejects(
-        launchDedicatedChrome({ ...defaults, chromePath: '/definitely/not/chrome' }, silent, { spawnProcess() { throw new Error('不应启动'); } }),
-        /没找到本机的 Google Chrome.*--chrome-path/s,
+        launchDedicatedBrowser({ ...defaults, browserPath: '/definitely/not/chrome' }, silent, noSpawn),
+        /--browser-path 指定的 \/definitely\/not\/chrome 不存在/,
     );
+    const nothing = { ...noSpawn, find: () => null };
+    await assert.rejects(launchDedicatedBrowser({ ...defaults }, silent, nothing), /没找到本机的 Chrome，也没找到 Edge.*--browser-path/s);
+    await assert.rejects(launchDedicatedBrowser({ ...defaults, browser: 'chrome' }, silent, nothing), /Google Chrome.*--browser edge/s);
+    await assert.rejects(launchDedicatedBrowser({ ...defaults, browser: 'edge' }, silent, nothing), /Microsoft Edge.*--browser chrome/s);
+});
+
+test('选 Edge 时启动的是 Edge，用 Edge 自己的 profile', async () => {
+    const server = createServer((req, res) => { res.writeHead(200); res.end('{}'); });
+    await new Promise((done) => server.listen(0, '127.0.0.1', done));
+    const { port } = server.address();
+    const said = [];
+    let call = null;
+    try {
+        const result = await launchDedicatedBrowser(
+            { ...defaults, cdpPort: port, browser: 'edge' },
+            { ...silent, say: (text) => said.push(text) },
+            {
+                find: ({ browser }) => (browser === 'edge' ? { kind: 'edge', exe: '/opt/edge/msedge' } : null),
+                spawnProcess(exe, args) {
+                    call = { exe, args };
+                    return { pid: 2, on() {}, unref() {} };
+                },
+            },
+        );
+        assert.equal(result.kind, 'edge');
+    } finally {
+        server.close();
+    }
+    assert.equal(call.exe, '/opt/edge/msedge');
+    assert.ok(call.args.includes(`--user-data-dir=${sideProfileDir('edge')}`), call.args.join(' '));
+    assert.ok(call.args.includes('--disable-backgrounding-occluded-windows'));
+    assert.ok(call.args.includes('--mute-audio'));
+    assert.match(said.join('\n'), /启动专用 Edge/);
 });
 
 test('没有课程页时一直等，用户点开课程后自动接管；Ctrl+C 能退出', async () => {

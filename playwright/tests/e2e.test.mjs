@@ -19,8 +19,8 @@ import { createLogger } from '../src/logger.mjs';
 import { defaults } from '../src/config.mjs';
 import { hardenFocus } from '../src/environment.mjs';
 import { collectFingerprint, probeTrustedInput } from '../src/diagnose.mjs';
-import { launchDedicatedChrome } from '../src/browser.mjs';
-import { findChrome } from '../src/platform.mjs';
+import { launchDedicatedBrowser } from '../src/browser.mjs';
+import { findBrowser } from '../src/platform.mjs';
 import { createServer } from 'node:net';
 
 const fast = {
@@ -300,7 +300,7 @@ async function freePort() {
 }
 
 test('一键启动：连不上时自己开专用 Chrome，打开起始页，webdriver 为 false', async (t) => {
-    if (!findChrome()) return t.skip('本机没有 Chrome');
+    if (!findBrowser({ browser: 'chrome' })) return t.skip('本机没有 Chrome');
     let chromium;
     try {
         ({ chromium } = await import('playwright-core'));
@@ -314,8 +314,8 @@ test('一键启动：连不上时自己开专用 Chrome，打开起始页，webd
     let browser = null;
     try {
         /* 真实运行时不带 --headless，这里只是为了测试时不弹窗 */
-        ({ pid } = await launchDedicatedChrome(
-            { ...defaults, cdpPort: port, chromeProfile: profileDir },
+        ({ pid } = await launchDedicatedBrowser(
+            { ...defaults, cdpPort: port, browser: 'chrome', browserProfile: profileDir },
             createLogger('silent'),
             { url: server.url, extraArgs: ['--headless=new'] },
         ));

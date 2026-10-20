@@ -1,6 +1,6 @@
 # 学习通刷课脚本
 
-自动播放学习通课程视频、放完自动切到下一节。fork 自 [chaolucky18/xuexitongScript](https://github.com/chaolucky18/xuexitongScript)，这个分支在原来的油猴脚本之外加了一个 **Playwright 版**：用你自己的 Chrome，点击是浏览器生成的真实输入，窗口可以放到后台。
+自动播放学习通课程视频、放完自动切到下一节。fork 自 [chaolucky18/xuexitongScript](https://github.com/chaolucky18/xuexitongScript)，这个分支在原来的油猴脚本之外加了一个 **Playwright 版**：用你自己的 Chrome 或 Edge，点击是浏览器生成的真实输入，窗口可以放到后台。
 
 两个版本：
 
@@ -17,7 +17,7 @@
 
 ### 1. 准备（只做一次）
 
-- **Google Chrome**：用你电脑上装的那个。
+- **Google Chrome 或 Microsoft Edge**：用你电脑上装的那个。两个都有时默认用 Chrome；Windows 自带 Edge，没装 Chrome 也能直接用。
 - **Node.js 20 或更新**：
   - Windows：没装也没关系，第一次运行 `start.cmd` 时会问你要不要用 winget 自动装。
   - macOS：`brew install node`；Linux：用系统的包管理器装 `nodejs`。也可以到 [nodejs.org](https://nodejs.org/) 下载 LTS 版。
@@ -33,8 +33,8 @@
 接下来：
 
 1. 第一次运行会自动安装依赖（只装一个约 5MB 的 npm 包，不下载浏览器），之后就不再装了。
-2. 脚本会自动打开一个**专用的 Chrome**：单独的用户目录，和你平时用的 Chrome 分开，全程静音。
-3. 在这个 Chrome 里**登录学习通**。只有第一次需要登录，以后会记住。
+2. 脚本会自动打开一个**专用的 Chrome**（没装 Chrome 就是 Edge）：单独的用户目录，和你平时用的浏览器分开，全程静音。
+3. 在这个浏览器里**登录学习通**。只有第一次需要登录，以后会记住。
 4. 进入要刷的课程，**点开任意一节**进到播放页。脚本看到播放页就会自动开始。
 
 从哪一节开始，脚本就从哪一节往后走。要停的时候按 `Ctrl+C`，或者直接关掉命令行窗口；浏览器不会被关掉。
@@ -52,6 +52,7 @@
 | 参数 | 作用 |
 | --- | --- |
 | `--max-sections <n>` | 播完 n 节就停（第一次可以用 `--max-sections 1` 试试） |
+| `--browser edge` | 用 Edge（`chrome` 用 Chrome；默认 `auto`：有 Chrome 用 Chrome，没有用 Edge） |
 | `--no-auto-advance-no-video` | 只剩测验等非视频任务点的小节停下来等你处理（默认是直接跳过） |
 | `--playback-rate <倍速>` | 默认 `max`，切到播放器倍速菜单里最高的一档；给数字则取不超过它的最高档，给 `1` 完全不碰 |
 | `--no-mute` | 不静音 |
@@ -64,9 +65,9 @@
 ### 运行期间注意
 
 - 浏览器窗口可以被别的窗口**盖住**，或者挪到另一个桌面，不影响播放。但**不要最小化**，也不要在同一个窗口里切到别的标签页，否则页面会变成后台状态，视频直接停。
-- Windows 上「被盖住没事」靠的是 Chrome 启动参数 `--disable-backgrounding-occluded-windows`：不带它，窗口被完全盖住不到 1 秒视频就停了。脚本自己开的 Chrome 都带；手动开的话照下面的命令来。
-- 脚本运行时，别在那个 Chrome 窗口里动鼠标。想用电脑就把它放到后面。
-- 刷完把这个专用 Chrome 关掉。它开着调试端口，开着的时候本机的任何程序都能控制它。
+- Windows 上「被盖住没事」靠的是浏览器启动参数 `--disable-backgrounding-occluded-windows`：不带它，窗口被完全盖住不到 1 秒视频就停了。脚本自己开的浏览器都带；手动开的话照下面的命令来。
+- 脚本运行时，别在那个浏览器窗口里动鼠标。想用电脑就把它放到后面。
+- 刷完把这个专用浏览器关掉。它开着调试端口，开着的时候本机的任何程序都能控制它。
 
 ### 遇到问题
 
@@ -75,15 +76,16 @@
 | 双击 `start.cmd` 后 Windows 提示"已保护你的电脑" | 点"更多信息"→"仍要运行"。从网上下载的 ZIP 解压出来的脚本可能会这样 |
 | `没找到 Node.js` | 按提示装 Node.js 20 或更新，装完重新运行 |
 | `依赖安装失败` | 检查网络后重新运行。国内网络慢的话，先执行 `npm config set registry https://registry.npmmirror.com` |
-| `没找到本机的 Google Chrome` | 装好 Chrome；装在别的位置的话，加 `--chrome-path <chrome 的完整路径>` |
-| `Chrome 启动了，但调试端口一直没打开` | 这个专用 Chrome 之前被你手动打开过（没带调试端口）。关掉所有 Chrome 窗口再运行 |
+| `没找到本机的 Chrome，也没找到 Edge` | 装好其中一个；装在别的位置的话，加 `--browser-path <浏览器的完整路径>` |
+| `Chrome 启动了，但调试端口一直没打开`（或 Edge） | 这个专用浏览器之前被你手动打开过（没带调试端口）。关掉它的所有窗口再运行 |
+| `…上开着的是 Chrome，不是你选的 Edge` | 之前用另一种浏览器跑过，那个专用窗口还开着。关掉它，或者加 `--cdp-port 9333` 换个端口 |
 | 日志说"还剩 N 个非视频任务点" | 章节测验等需要你自己完成，脚本已经跳过去继续播视频了 |
 | `点了目录…但页面没有切过去` | 平台可能弹了提示框，看一眼浏览器，处理掉再重新运行 |
 | 页面改版、脚本找不到东西 | 先跑 `--inspect` 看真实结构，再带着输出提 issue |
 
-### 进阶：自己启动 Chrome
+### 进阶：自己启动浏览器
 
-不想让脚本代劳的话，也可以自己用调试端口启动 Chrome，脚本连得上就不会再启动一个。命令和脚本用的是同一组参数：
+不想让脚本代劳的话，也可以自己用调试端口启动 Chrome 或 Edge，脚本连得上就不会再启动一个。命令和脚本用的是同一组参数：
 
 ```bash
 # Linux
@@ -97,9 +99,15 @@ google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chro
 ```bat
 :: Windows（cmd）
 "%ProgramFiles%\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome" --disable-backgrounding-occluded-windows --mute-audio
+
+:: Windows 上用 Edge
+"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-edge" --disable-backgrounding-occluded-windows --mute-audio
 ```
 
-- `--user-data-dir` 一定要是单独的目录。和平时用的 Chrome 共用的话，如果平时的 Chrome 已经开着，这条命令只会在原来的窗口里多开一个标签，**调试端口不会打开**。
+Linux / macOS 上用 Edge 的话，把命令换成 `microsoft-edge` 或 `"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"`，目录换成 `xuexitong-edge`。
+
+- `--user-data-dir` 一定要是单独的目录。和平时用的浏览器共用的话，如果它已经开着，这条命令只会在原来的窗口里多开一个标签，**调试端口不会打开**。Edge 关掉窗口后默认还会在后台留着进程，更容易碰上这一条。
+- Chrome 和 Edge 的目录要分开（`xuexitong-chrome` / `xuexitong-edge`），两者的用户目录格式不完全通用。
 - 加 `--no-auto-launch` 可以让脚本连不上时只报错，不自己启动。
 
 更多技术细节（为什么这么做、还能被什么查出来、测试怎么跑）见 [`playwright/README.md`](playwright/README.md)。
@@ -119,7 +127,7 @@ xuexitongScript/
 │   ├── package.json
 │   ├── src/
 │   │   ├── course.mjs      课程流程：读目录、选下一节、起播、监控、切节
-│   │   ├── browser.mjs     连接 Chrome；连不上时启动专用 Chrome；等你打开课程页
+│   │   ├── browser.mjs     连接浏览器；连不上时启动专用 Chrome / Edge；等你打开课程页
 │   │   ├── setup.mjs       第一次运行时自动安装依赖
 │   │   ├── pointer.mjs     真实指针：贝塞尔轨迹、点击、滚轮
 │   │   ├── environment.mjs 焦点与生命周期模拟（窗口放后台不触发 blur）
@@ -128,7 +136,7 @@ xuexitongScript/
 │   │   ├── inspect.mjs     --inspect 只读检查
 │   │   ├── diagnose.mjs    --check 特征自检
 │   │   ├── human.mjs       随机化（等待时长、落点）
-│   │   ├── platform.mjs    三平台差异（Chrome 路径、profile 目录）
+│   │   ├── platform.mjs    三平台差异（Chrome / Edge 路径、profile 目录）
 │   │   └── logger.mjs
 │   └── tests/              单元测试 + 用真实 Chrome 跑的端到端测试
 ├── userscript/             油猴 / 控制台版

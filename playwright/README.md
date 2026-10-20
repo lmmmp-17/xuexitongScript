@@ -39,7 +39,8 @@
 
 Node 和 `playwright-core` 本身三平台通用。需要分平台处理的只有两件事，代码里已经处理：
 
-- **Chrome 可执行文件位置**：`channel: 'chrome'` 让 Playwright 自己去找（注册表 / 标准安装路径）；错误提示里的手动启动命令按 `process.platform` 给对应的那一条（`src/platform.mjs`）
+- **浏览器可执行文件位置**：自动启动时按平台去标准安装位置找（`src/platform.mjs`），`--browser auto` 先找 Chrome、没有再找 Edge；launch 模式用 `channel: 'chrome'` / `'msedge'` 让 Playwright 自己去找。错误提示里的手动启动命令优先用本机实际找到的路径
+- **Chrome 和 Edge**：都是 Chromium 内核，启动参数、CDP、焦点模拟完全一样，差别只在路径和专用 profile 目录（`xuexitong-chrome` / `xuexitong-edge`，分开放，两者的 profile 格式不完全通用）。调试端口上已经开着另一种浏览器、而 `--browser` 明确选了这一种时会报错，不会悄悄接管
 - **profile 目录**：`--profile-dir` 一律 `path.resolve()` 成绝对路径，否则换个工作目录就换了一个 profile
 
 没有用到任何 shell 命令、路径分隔符假设或平台专有 API。`--launch` 模式下 `--start-maximized` 在 Linux 的部分窗口管理器下会被忽略，不影响功能。

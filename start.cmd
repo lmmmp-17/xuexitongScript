@@ -3,7 +3,7 @@ setlocal
 for /f "tokens=2 delims=:." %%c in ('chcp') do set "OLDCP=%%c"
 chcp 65001 >nul
 rem 学习通 Playwright 版的入口（Windows）：双击运行即可。
-rem 第一次运行会自动安装依赖；连不上 Chrome 时会自动启动一个专用的 Chrome。
+rem 第一次运行会自动安装依赖；连不上浏览器时会自动启动一个专用的 Chrome（没装就用 Edge）。
 rem 参数原样传给 run.mjs，比如在命令行里 start.cmd --max-sections 1
 cd /d "%~dp0playwright"
 

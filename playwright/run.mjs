@@ -105,8 +105,8 @@ async function main() {
         /* close() 里已经区分了“自己启动的要关掉”和“连上去的只断开” */
         await session.close();
         /* 这句要排在错误信息后面, 所以留到进程退出前再打 */
-        if (session.launchedChrome) {
-            parting = '提示：脚本启动的那个专用 Chrome 还开着（登录状态保存在里面）。'
+        if (session.launchedBrowser) {
+            parting = `提示：脚本启动的那个专用 ${session.browserName} 还开着（登录状态保存在里面）。`
                 + '用完请关掉它——调试端口开着的时候，本机任何程序都能控制它。';
         }
     }
