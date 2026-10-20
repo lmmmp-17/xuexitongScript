@@ -1,6 +1,6 @@
 # 油猴 / 控制台版（V3）
 
-> 这是仓库里两个版本之一。另一个是 **[Playwright 版](../playwright/)**：点击是浏览器生成的真实输入（`isTrusted` 为 `true`），窗口可以放到后台；代价是要装 Node 和一个 npm 包。安装步骤见[根目录 README 的快速开始](../README.md#快速开始playwright-版)。
+> 这是仓库里两个版本之一。另一个是 **[Playwright 版](../playwright/)**：点击是浏览器生成的真实输入（`isTrusted` 为 `true`），窗口可以放到后台；代价是要装 Node 和一个 npm 包。安装步骤见[根目录 README 的初级使用教程](../README.md#一初级使用教程)。
 >
 > 这一版粘贴即用、零依赖，但点击是页面内合成的，`event.isTrusted` 为 `false` 且无法伪造。
 
