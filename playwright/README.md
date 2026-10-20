@@ -33,7 +33,7 @@
 
 - 把课程页放在一个**单独的 Chrome 窗口**里。失焦但没被遮住的窗口，其活动标签页的 `visibilityState` 仍然是 `visible`，只有 `hasFocus()` 会变 `false`——而那一项已经被模拟掉了。
 - 不要在同一个窗口里切到别的标签页，那会让课程页变成后台标签（`hidden`）。
-- 窗口最小化也会变 `hidden`。放到别的窗口后面、或者挪到另一个工作区都没问题。
+- 窗口最小化也会变 `hidden`。放到别的窗口后面、或者挪到另一个工作区都没问题——但 **Windows 上窗口被完全盖住同样会变 `hidden`**，视频直接暂停（实测 Chrome 155 / Win11，1 秒内）。启动参数 `--disable-backgrounding-occluded-windows` 能兜住遮挡，兜不住最小化。脚本自己开的 Chrome 和 Playwright 的 launch 模式都带了这一项，手动开 Chrome 时要自己加。
 
 ## 跨平台
 

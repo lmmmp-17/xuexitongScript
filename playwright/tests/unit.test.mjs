@@ -104,6 +104,7 @@ test('平台提示用的是独立 profile 目录', () => {
     assert.match(hint, /--remote-debugging-port=9222/);
     assert.match(hint, /--user-data-dir/);
     assert.match(hint, /--mute-audio/);
+    assert.match(hint, /--disable-backgrounding-occluded-windows/, 'Windows 上窗口被盖住会变 hidden，手动命令也得带');
     assert.ok(describePlatform().length > 0);
 });
 
@@ -499,6 +500,7 @@ test('自动启动专用 Chrome 的参数：和手动命令同一组，不带任
     assert.ok(args.includes('--remote-debugging-port=9222'));
     assert.ok(args.includes('--user-data-dir=/home/u/xuexitong-chrome'));
     assert.ok(args.includes('--mute-audio'), '默认静音');
+    assert.ok(args.includes('--disable-backgrounding-occluded-windows'), 'Windows 上窗口被盖住会变 hidden，视频直接停');
     assert.equal(args.at(-1), 'https://i.chaoxing.com/');
     assert.equal(args.some((a) => /automation|headless|webdriver/i.test(a)), false);
     assert.equal(dedicatedChromeArgs({ port: 1, profileDir: '/p', mute: false }).includes('--mute-audio'), false);

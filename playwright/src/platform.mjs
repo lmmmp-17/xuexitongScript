@@ -77,13 +77,19 @@ export function findChrome({ configured = '', platform = process.platform, env =
 }
 
 /* 自动启动专用 Chrome 时的参数，和下面 chromeLaunchHint 让人手动敲的是同一组，
- * 只多了两个跳过首次运行引导的开关。没有任何自动化相关的参数。 */
+ * 只多了两个跳过首次运行引导的开关。没有任何自动化相关的参数。
+ *
+ * --disable-backgrounding-occluded-windows：Windows 上 Chrome 会追踪窗口有没有被
+ * 盖住。实测（Chrome 155 / Win11）窗口被别的窗口完全盖住后 1 秒内页面就变 hidden，
+ * 视频被直接暂停——不是变慢，盖着的那段时间进度一点不走。加了这一项被盖住也保持
+ * visible；最小化照样会 hidden，这个兜不住。Playwright 自己 launch 时默认就带。 */
 export function dedicatedChromeArgs({ port, profileDir, mute = true, url = '' }) {
     return [
         `--remote-debugging-port=${port}`,
         `--user-data-dir=${profileDir}`,
         '--no-first-run',
         '--no-default-browser-check',
+        '--disable-backgrounding-occluded-windows',
         ...(mute ? ['--mute-audio'] : []),
         ...(url ? [url] : []),
     ];
@@ -103,6 +109,7 @@ export function chromeLaunchHint(port) {
     const flags = [
         `--remote-debugging-port=${port}`,
         `--user-data-dir="${sideProfilePath()}"`,
+        '--disable-backgrounding-occluded-windows',
         '--mute-audio',
     ];
     if (process.platform === 'win32') {

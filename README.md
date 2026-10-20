@@ -63,7 +63,8 @@
 
 ### 运行期间注意
 
-- 浏览器窗口可以放到别的窗口**后面**，或者挪到另一个桌面，不影响播放。但**不要最小化**，也不要在同一个窗口里切到别的标签页，否则页面会变成后台状态。
+- 浏览器窗口可以被别的窗口**盖住**，或者挪到另一个桌面，不影响播放。但**不要最小化**，也不要在同一个窗口里切到别的标签页，否则页面会变成后台状态，视频直接停。
+- Windows 上「被盖住没事」靠的是 Chrome 启动参数 `--disable-backgrounding-occluded-windows`：不带它，窗口被完全盖住不到 1 秒视频就停了。脚本自己开的 Chrome 都带；手动开的话照下面的命令来。
 - 脚本运行时，别在那个 Chrome 窗口里动鼠标。想用电脑就把它放到后面。
 - 刷完把这个专用 Chrome 关掉。它开着调试端口，开着的时候本机的任何程序都能控制它。
 
@@ -86,16 +87,16 @@
 
 ```bash
 # Linux
-google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --mute-audio &
+google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --disable-backgrounding-occluded-windows --mute-audio &
 
 # macOS
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --mute-audio &
+  --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chrome" --disable-backgrounding-occluded-windows --mute-audio &
 ```
 
 ```bat
 :: Windows（cmd）
-"%ProgramFiles%\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome" --mute-audio
+"%ProgramFiles%\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome" --disable-backgrounding-occluded-windows --mute-audio
 ```
 
 - `--user-data-dir` 一定要是单独的目录。和平时用的 Chrome 共用的话，如果平时的 Chrome 已经开着，这条命令只会在原来的窗口里多开一个标签，**调试端口不会打开**。
