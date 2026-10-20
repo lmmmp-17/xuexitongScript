@@ -129,6 +129,16 @@ export function findBrowser({ browser = 'auto', configured = '', platform = proc
     return null;
 }
 
+/* Edge 独有的几项。实测（Edge 155 / Win11，Windows 登录着微软账号）：只带
+ * --no-first-run 时，Edge 会把这个全新的专用 profile 也用系统账号自动登录上，并打开
+ * 全量同步——弹一个「正在你的所有设备上同步」的模态框把页面压暗，主账号的书签、密码、
+ * 扩展同步进来，这边的浏览记录也同步回去。专用 profile 就不再独立了。
+ *   msImplicitSignin      跟着系统账号自动登录
+ *   msForceBrowserSignIn  强制登录（Playwright 启动 Edge 时也关这一项）
+ *   --disable-sync        同步（Playwright 启动时也带）
+ * 都只改浏览器自己的行为，页面上看不到。用组策略也能关，但那会连用户自己的 Edge 一起改。 */
+export const EDGE_ARGS = ['--disable-features=msImplicitSignin,msForceBrowserSignIn', '--disable-sync'];
+
 /* 自动启动专用浏览器时的参数，和下面 launchHint 让人手动敲的是同一组，
  * 只多了两个跳过首次运行引导的开关。没有任何自动化相关的参数。
  *
@@ -137,13 +147,14 @@ export function findBrowser({ browser = 'auto', configured = '', platform = proc
  * 视频被直接暂停——不是变慢，盖着的那段时间进度一点不走。加了这一项被盖住也保持
  * visible；最小化照样会 hidden，这个兜不住。Playwright 自己 launch 时默认就带。
  * Chrome 和 Edge 用的是同一组：这些都是 Chromium 本身的开关，Edge 照认。 */
-export function dedicatedArgs({ port, profileDir, mute = true, url = '' }) {
+export function dedicatedArgs({ port, profileDir, mute = true, url = '', kind = 'chrome' }) {
     return [
         `--remote-debugging-port=${port}`,
         `--user-data-dir=${profileDir}`,
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-backgrounding-occluded-windows',
+        ...(kind === 'edge' ? EDGE_ARGS : []),
         ...(mute ? ['--mute-audio'] : []),
         ...(url ? [url] : []),
     ];
@@ -169,6 +180,7 @@ export function launchHint(port, kind = 'chrome', exe = '') {
         `--remote-debugging-port=${port}`,
         `--user-data-dir="${sideProfilePath(kind)}"`,
         '--disable-backgrounding-occluded-windows',
+        ...(kind === 'edge' ? EDGE_ARGS : []),
         '--mute-audio',
     ];
     if (process.platform === 'win32') {

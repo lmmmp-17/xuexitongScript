@@ -73,7 +73,7 @@ export async function launchDedicatedBrowser(config, log, { spawnProcess = spawn
     const { kind, exe } = found;
     const name = browserName(kind);
     const profileDir = config.browserProfile ? resolve(config.browserProfile) : sideProfileDir(kind);
-    const args = [...dedicatedArgs({ port: config.cdpPort, profileDir, mute: config.mute, url }), ...extraArgs];
+    const args = [...dedicatedArgs({ port: config.cdpPort, profileDir, mute: config.mute, url, kind }), ...extraArgs];
     log.say(`启动专用 ${name}（独立 profile：${profileDir}${config.mute ? '，静音' : ''}）`);
     const child = spawnProcess(exe, args, { detached: true, stdio: 'ignore' });
     child.on('error', () => {});
@@ -115,6 +115,9 @@ export function launchOptions({ mute = true, kind = 'chrome' } = {}) {
              * (muted / volume 都不变), 只是声音不送到声卡。Playwright 只在
              * 无头模式才默认带这一项。connect 模式管不到启动参数, 靠播放器上的静音。 */
             ...(mute ? ['--mute-audio'] : []),
+            /* 这里不加 Edge 的 EDGE_ARGS：Playwright 自己会带一条 --disable-features，
+             * 再写一条会把它整条盖掉（同名开关后一个生效）。它自带的那组里已经有
+             * --disable-sync 和 msForceBrowserSignIn，但没有 msImplicitSignin。 */
         ],
     };
 }

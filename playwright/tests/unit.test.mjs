@@ -109,6 +109,8 @@ test('平台提示用的是独立 profile 目录', () => {
     const edge = launchHint(9222, 'edge');
     assert.match(edge, /edge/i);
     assert.match(edge, /xuexitong-edge/, 'Edge 用自己的 profile 目录');
+    assert.match(edge, /--disable-features=msImplicitSignin\S* --disable-sync/, '手动命令也要关掉自动登录和同步');
+    assert.doesNotMatch(hint, /msImplicitSignin/);
     assert.match(launchHint(9222, 'edge', '/opt/edge/msedge'), /^"\/opt\/edge\/msedge" /, '找到了就用实际位置');
 });
 
@@ -564,6 +566,7 @@ test('自动启动专用浏览器的参数：和手动命令同一组，不带�
     assert.equal(args.at(-1), 'https://i.chaoxing.com/');
     assert.equal(args.some((a) => /automation|headless|webdriver/i.test(a)), false);
     assert.equal(dedicatedArgs({ port: 1, profileDir: '/p', mute: false }).includes('--mute-audio'), false);
+    assert.equal(args.some((a) => /disable-sync|disable-features/.test(a)), false, 'Edge 独有的开关不加给 Chrome');
 });
 
 test('连不上时自动启动专用浏览器：独立进程、不跟着脚本退出、等到调试端口就绪', async () => {
@@ -637,6 +640,10 @@ test('选 Edge 时启动的是 Edge，用 Edge 自己的 profile', async () => {
     assert.ok(call.args.includes('--disable-backgrounding-occluded-windows'));
     assert.ok(call.args.includes('--mute-audio'));
     assert.match(said.join('\n'), /启动专用 Edge/);
+    /* Windows 登录着微软账号时，Edge 会把新 profile 自动登录并打开同步（实测），这两项关掉它 */
+    assert.ok(call.args.includes('--disable-sync'));
+    assert.ok(call.args.some((a) => /^--disable-features=.*msImplicitSignin/.test(a)), call.args.join(' '));
+    assert.equal(call.args.filter((a) => a.startsWith('--disable-features=')).length, 1, '写两条的话后一条会盖掉前一条');
 });
 
 test('没有课程页时一直等，用户点开课程后自动接管；Ctrl+C 能退出', async () => {

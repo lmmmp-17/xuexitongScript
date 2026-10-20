@@ -101,10 +101,12 @@ google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/xuexitong-chro
 "%ProgramFiles%\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-chrome" --disable-backgrounding-occluded-windows --mute-audio
 
 :: Windows 上用 Edge
-"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-edge" --disable-backgrounding-occluded-windows --mute-audio
+"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222 --user-data-dir="%USERPROFILE%\xuexitong-edge" --disable-backgrounding-occluded-windows --disable-features=msImplicitSignin,msForceBrowserSignIn --disable-sync --mute-audio
 ```
 
-Linux / macOS 上用 Edge 的话，把命令换成 `microsoft-edge` 或 `"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"`，目录换成 `xuexitong-edge`。
+Linux / macOS 上用 Edge 的话，把命令换成 `microsoft-edge` 或 `"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"`，目录换成 `xuexitong-edge`，同样加上 `--disable-features=msImplicitSignin,msForceBrowserSignIn --disable-sync`。
+
+Edge 多出来的那两项不能省：Windows 上登录着微软账号时，Edge 会把这个全新的专用目录也自动登录上并打开同步，弹一个同步确认框挡住页面，你主账号的书签、密码、扩展会同步进来，这边的浏览记录也会同步回你的账号。
 
 - `--user-data-dir` 一定要是单独的目录。和平时用的浏览器共用的话，如果它已经开着，这条命令只会在原来的窗口里多开一个标签，**调试端口不会打开**。Edge 关掉窗口后默认还会在后台留着进程，更容易碰上这一条。
 - Chrome 和 Edge 的目录要分开（`xuexitong-chrome` / `xuexitong-edge`），两者的用户目录格式不完全通用。
